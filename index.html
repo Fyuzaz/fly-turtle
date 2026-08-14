@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Editor web de documentos profissional com exportação para PDF, DOCX e PNG. Suporta múltiplos formatos de página e biblioteca de mídia integrada." />
+  <title>WebDoc — Editor de Documentos</title>
+
+  <!-- Google Fonts (preconnect para performance) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <!-- CKEditor 5 Superbuild -->
+  <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/super-build/ckeditor.js"></script>
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/editor.css" />
+  <link rel="stylesheet" href="css/media-library.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     APP SHELL
+════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ─── HEADER ───────────────────────────────────────── -->
+  <header id="app-header">
+
+    <!-- Esquerda: logo + nome do documento -->
+    <div class="header-left">
+      <a class="app-logo" href="#" title="WebDoc — Editor de Documentos">
+        <div class="logo-icon">📄</div>
+        <span>WebDoc</span>
+      </a>
+
+      <input
+        id="doc-name-input"
+        type="text"
+        value="Novo Documento"
+        maxlength="80"
+        title="Clique para renomear o documento"
+        aria-label="Nome do documento"
+      />
+    </div>
+
+    <!-- Centro: seletor de formato + orientação -->
+    <div class="header-center">
+      <div class="page-format-group" title="Formato de página">
+        <select
+          id="page-format-select"
+          aria-label="Selecionar formato de página"
+          onchange="App.onFormatChange(this.value)"
+        >
+          <!-- Preenchido dinamicamente pelo JS -->
+        </select>
+
+        <button
+          id="orientation-btn"
+          title="Alternar orientação (Retrato / Paisagem)"
+          aria-label="Alternar orientação"
+          onclick="App.toggleOrientation()"
+        >
+          <!-- Ícone de orientação (SVG inline, sem dependência externa) -->
+          <svg id="orientation-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="4" y="2" width="16" height="20" rx="2" ry="2"/>
+          </svg>
+        </button>
+      </div>
+
+      <span id="format-chip" class="format-chip">A4 · 210×297mm</span>
+    </div>
+
+    <!-- Direita: exportar + biblioteca de mídia -->
+    <div class="header-right">
+      <div class="export-group">
+        <button id="export-pdf-btn"
+                class="btn-export btn-export-pdf"
+                title="Exportar como PDF"
+                onclick="Exporter.exportDoc('pdf')">
+          📄 PDF
+        </button>
+
+        <button id="export-docx-btn"
+                class="btn-export btn-export-docx"
+                title="Exportar como DOCX (Word)"
+                onclick="Exporter.exportDoc('docx')">
+          📝 DOCX
+        </button>
+
+        <button id="export-png-btn"
+                class="btn-export btn-export-png"
+                title="Exportar como imagem PNG"
+                onclick="Exporter.exportDoc('png')">
+          🖼️ PNG
+        </button>
+      </div>
+
+      <button id="media-library-btn"
+              title="Abrir Biblioteca de Mídia"
+              onclick="MediaLibrary.toggleDrawer()">
+        🗂️ Mídia
+      </button>
+    </div>
+  </header><!-- /app-header -->
+
+
+  <!-- ─── TOOLBAR (CKEditor monta aqui) ────────────────── -->
+  <div id="toolbar-bar" role="toolbar" aria-label="Barra de formatação"></div>
+
+
+  <!-- ─── ÁREA PRINCIPAL ───────────────────────────────── -->
+  <div id="main-area">
+
+    <!-- Workspace -->
+    <div id="workspace">
+      <div id="page-sheet" role="main" aria-label="Área de edição do documento">
+        <div id="editor">
+          <h2>Bem-vindo ao WebDoc</h2>
+          <p>Comece a redigir seu documento aqui. Use a barra de formatação acima para estilizar o texto, inserir tabelas, imagens e muito mais.</p>
+        </div>
+      </div>
+    </div><!-- /workspace -->
+
+
+    <!-- ─── GAVETA DE MÍDIA ───────────────────────────── -->
+    <aside id="media-drawer" aria-label="Biblioteca de Mídia">
+
+      <div class="drawer-header">
+        <div class="drawer-title">🗂️ Biblioteca de Mídia</div>
+        <button class="drawer-close-btn"
+                title="Fechar gaveta"
+                onclick="MediaLibrary.closeDrawer()">✕</button>
+      </div>
+
+      <!-- Busca -->
+      <div class="drawer-search">
+        <div class="search-input-wrap">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input id="media-search-input"
+                 type="text"
+                 placeholder="Buscar arquivos..."
+                 aria-label="Buscar na biblioteca de mídia" />
+        </div>
+      </div>
+
+      <div class="drawer-body">
+
+        <!-- Pastas -->
+        <div class="folder-panel">
+          <div class="folder-panel-header">
+            <span class="folder-panel-title">Pastas</span>
+            <button class="folder-add-btn"
+                    title="Criar nova pasta"
+                    onclick="MediaLibrary.showCreateFolderInput()">＋</button>
+          </div>
+          <ul id="folder-list" class="folder-list" role="listbox" aria-label="Pastas da biblioteca"></ul>
+        </div>
+
+        <!-- Zona de upload -->
+        <div id="upload-zone" class="upload-zone" role="button" tabindex="0"
+             aria-label="Clique ou arraste arquivos para fazer upload">
+          <div class="upload-zone-icon">☁️</div>
+          <div class="upload-zone-text">
+            <strong>Clique ou arraste</strong> para enviar<br/>
+            <span class="upload-zone-hint">Imagens: JPG, PNG, GIF, WebP, SVG<br/>Vídeos: MP4, WebM</span>
+          </div>
+          <div class="upload-progress" id="upload-progress">
+            <div class="upload-progress-bar" id="upload-progress-bar"></div>
+          </div>
+        </div>
+
+        <!-- Grid de arquivos -->
+        <div class="files-section">
+          <div class="files-section-header">
+            <span class="files-section-title">Arquivos</span>
+            <span class="files-count" id="files-count"></span>
+          </div>
+          <div class="files-grid" id="files-grid" role="list" aria-label="Arquivos da pasta"></div>
+        </div>
+
+      </div><!-- /drawer-body -->
+    </aside><!-- /media-drawer -->
+
+  </div><!-- /main-area -->
+
+
+  <!-- ─── STATUS BAR ───────────────────────────────────── -->
+  <footer id="status-bar" aria-label="Barra de status">
+    <div class="status-group">
+      <span class="status-item" id="word-count">0 palavras</span>
+      <span class="status-item" id="char-count">0 char</span>
+    </div>
+    <div class="status-group">
+      <span class="status-item" id="page-dimensions">210 × 297 mm</span>
+      <span class="status-item" id="save-indicator">Pronto</span>
+    </div>
+  </footer>
+
+</div><!-- /app -->
+
+
+<!-- ═══════════════════════════════════════════════════════
+     MODAL — TAMANHO PERSONALIZADO
+════════════════════════════════════════════════════════ -->
+<div id="custom-size-modal" class="modal-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="custom-size-title">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="custom-size-title">📐 Tamanho Personalizado</h3>
+      <button class="modal-close-btn" onclick="App.closeCustomModal()" aria-label="Fechar">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <label>Unidade de medida</label>
+      <select id="custom-unit" onchange="App.onCustomUnitChange()">
+        <option value="mm" selected>Milímetros (mm)</option>
+        <option value="cm">Centímetros (cm)</option>
+        <option value="in">Polegadas (in)</option>
+        <option value="px">Pixels (px)</option>
+      </select>
+
+      <label>Dimensões da página</label>
+      <div class="input-row-2">
+        <div>
+          <label style="margin-top:0;font-size:10px;">Largura</label>
+          <input id="custom-width"  type="number" min="1" step="0.1" value="210"
+                 placeholder="Largura" oninput="App.previewCustom()" />
+        </div>
+        <div>
+          <label style="margin-top:0;font-size:10px;">Altura</label>
+          <input id="custom-height" type="number" min="1" step="0.1" value="297"
+                 placeholder="Altura"  oninput="App.previewCustom()" />
+        </div>
+      </div>
+
+      <label>Nome do formato (para salvar)</label>
+      <input id="custom-format-name" type="text" placeholder="Ex: Cartão Visita" maxlength="40" />
+      <p style="font-size:10px;color:var(--color-text-muted);margin-top:4px;">
+        Deixe em branco para aplicar sem salvar. Formatos salvos aparecem no seletor acima.
+      </p>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="App.closeCustomModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="App.applyCustomSize()">Aplicar</button>
+    </div>
+  </div>
+</div><!-- /custom-size-modal -->
+
+
+<!-- ─── Toast Container ───────────────────────────────── -->
+<div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     SCRIPTS
+════════════════════════════════════════════════════════ -->
+<script src="js/page-formats.js"></script>
+<script src="js/media-library.js"></script>
+<script src="js/upload-adapter.js"></script>
+<script src="js/export.js"></script>
+<script src="js/editor.js"></script>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   App — Orquestração principal
+════════════════════════════════════════════════════════ */
+const App = (() => {
+
+  /* ── Inicialização ─────────────────────────────────────── */
+  async function init() {
+    PageFormats.init();
+    _buildFormatSelector();
+    _updateFormatChip(PageFormats.getCurrent());
+
+    // Inicia o editor
+    await EditorApp.init();
+
+    // Escuta mudanças de formato
+    window.addEventListener('pageFormatChanged',   e => _updateFormatChip(e.detail));
+    window.addEventListener('customFormatsUpdated', () => _buildFormatSelector());
+
+    // Salva nome do documento
+    document.getElementById('doc-name-input')?.addEventListener('change', e => {
+      document.title = `${e.target.value} — WebDoc`;
+    });
+  }
+
+  /* ── Seletor de formatos ────────────────────────────────── */
+  function _buildFormatSelector() {
+    const sel = document.getElementById('page-format-select');
+    if (!sel) return;
+
+    const { groups, custom } = PageFormats.getAllFormats();
+    const current = PageFormats.getCurrent().name;
+    sel.innerHTML = '';
+
+    // Grupos de presets
+    Object.entries(groups).forEach(([groupName, names]) => {
+      const og = document.createElement('optgroup');
+      og.label = groupName;
+      names.forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = PageFormats.getLabel(n);
+        opt.selected = (n === current);
+        og.appendChild(opt);
+      });
+      sel.appendChild(og);
+    });
+
+    // Formatos customizados
+    const customKeys = Object.keys(custom);
+    if (customKeys.length) {
+      const og = document.createElement('optgroup');
+      og.label = '⭐ Meus Formatos';
+      customKeys.forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = PageFormats.getLabel(n);
+        opt.selected = (n === current);
+        og.appendChild(opt);
+      });
+      sel.appendChild(og);
+    }
+
+    // Opção "Personalizado..."
+    const divider = document.createElement('option');
+    divider.disabled = true;
+    divider.textContent = '──────────';
+    sel.appendChild(divider);
+
+    const custom_opt = document.createElement('option');
+    custom_opt.value = '__custom__';
+    custom_opt.textContent = '📐 Tamanho personalizado...';
+    sel.appendChild(custom_opt);
+  }
+
+  function onFormatChange(value) {
+    if (value === '__custom__') {
+      // Restaura a seleção anterior antes de abrir o modal
+      const current = PageFormats.getCurrent().name;
+      document.getElementById('page-format-select').value = current;
+      openCustomModal();
+      return;
+    }
+    PageFormats.applyFormat(value);
+  }
+
+  /* ── Orientação ────────────────────────────────────────── */
+  function toggleOrientation() {
+    const isLandscape = PageFormats.toggleOrientation();
+    const btn = document.getElementById('orientation-btn');
+    if (btn) btn.classList.toggle('landscape', isLandscape);
+    btn?.setAttribute('title', isLandscape ? 'Orientação: Paisagem (clique para Retrato)' : 'Orientação: Retrato (clique para Paisagem)');
+  }
+
+  /* ── Chip de formato ───────────────────────────────────── */
+  function _updateFormatChip(fmt) {
+    const chip = document.getElementById('format-chip');
+    const dims = document.getElementById('page-dimensions');
+    const w    = Math.round(fmt.width);
+    const h    = Math.round(fmt.height);
+    const label = `${fmt.name} · ${w}×${h}mm`;
+
+    if (chip) chip.textContent = label;
+    if (dims) dims.textContent = `${w} × ${h} mm`;
+
+    // Atualiza seletor para refletir formato atual
+    const sel = document.getElementById('page-format-select');
+    if (sel && sel.value !== fmt.name) {
+      const exists = [...sel.options].some(o => o.value === fmt.name);
+      if (exists) sel.value = fmt.name;
+    }
+  }
+
+  /* ── Modal Tamanho Personalizado ────────────────────────── */
+  function openCustomModal() {
+    const modal = document.getElementById('custom-size-modal');
+    if (!modal) return;
+
+    // Preenche com o formato atual
+    const cur = PageFormats.getCurrent();
+    document.getElementById('custom-width').value  = Math.round(cur.width);
+    document.getElementById('custom-height').value = Math.round(cur.height);
+    document.getElementById('custom-unit').value   = 'mm';
+    document.getElementById('custom-format-name').value = '';
+
+    modal.classList.add('active');
+  }
+
+  function closeCustomModal() {
+    document.getElementById('custom-size-modal')?.classList.remove('active');
+  }
+
+  // Preview em tempo real ao digitar
+  function previewCustom() {
+    const w = document.getElementById('custom-width')?.value;
+    const h = document.getElementById('custom-height')?.value;
+    const u = document.getElementById('custom-unit')?.value || 'mm';
+    if (w && h) PageFormats.previewCustom(w, h, u);
+  }
+
+  // Atualiza placeholders/valores quando muda a unidade
+  function onCustomUnitChange() {
+    const unit = document.getElementById('custom-unit')?.value;
+    const hints = { mm: [210, 297], cm: [21, 29.7], in: [8.27, 11.69], px: [794, 1123] };
+    const [w, h] = hints[unit] || [210, 297];
+    document.getElementById('custom-width').value  = w;
+    document.getElementById('custom-height').value = h;
+    previewCustom();
+  }
+
+  function applyCustomSize() {
+    const w    = document.getElementById('custom-width')?.value;
+    const h    = document.getElementById('custom-height')?.value;
+    const u    = document.getElementById('custom-unit')?.value || 'mm';
+    const name = document.getElementById('custom-format-name')?.value?.trim();
+
+    try {
+      if (name) {
+        PageFormats.saveAndApplyCustom(name, w, h, u);
+        _buildFormatSelector();
+        showToast(`Formato "${name}" salvo!`, 'success');
+      } else {
+        PageFormats.previewCustom(w, h, u);
+        // Gera um nome descritivo
+        const wMm = Math.round(PageFormats.toMm(w, u));
+        const hMm = Math.round(PageFormats.toMm(h, u));
+        window.dispatchEvent(new CustomEvent('pageFormatChanged', {
+          detail: { name: `${wMm}×${hMm}mm`, width: wMm, height: hMm, landscape: false }
+        }));
+        showToast('Tamanho aplicado!', 'success');
+      }
+      closeCustomModal();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  /* ── Fechar modal clicando fora ────────────────────────── */
+  document.addEventListener('click', e => {
+    if (e.target.id === 'custom-size-modal') closeCustomModal();
+  });
+
+  /* ── Atalhos de teclado ────────────────────────────────── */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeCustomModal();
+  });
+
+  return { init, onFormatChange, toggleOrientation, openCustomModal, closeCustomModal, previewCustom, onCustomUnitChange, applyCustomSize };
+
+})();
+
+
+/* ══════════════════════════════════════════════════════════
+   Toast Global
+════════════════════════════════════════════════════════ */
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const ICONS = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<span>${ICONS[type] || 'ℹ️'}</span><span>${message}</span>`;
+  container.appendChild(toast);
+
+  const remove = () => {
+    toast.classList.add('fade-out');
+    toast.addEventListener('animationend', () => toast.remove(), { once: true });
+  };
+
+  const timer = setTimeout(remove, 4000);
+  toast.addEventListener('click', () => { clearTimeout(timer); remove(); });
+}
+
+window.showToast = showToast;
+
+
+/* ══════════════════════════════════════════════════════════
+   Inicialização
+════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => App.init());
+</script>
+</body>
+</html>

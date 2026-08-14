@@ -1,0 +1,538 @@
+/* ============================================
+   EDITOR.CSS — Layout do Editor & Página
+   Editor Web de Documentos
+============================================ */
+
+/* ─── Page Format CSS Variables ─────────────── */
+:root {
+  --page-width:    210mm;
+  --page-height:   297mm;
+  --page-pad-v:    25mm;
+  --page-pad-h:    20mm;
+}
+
+/* ─── App Shell ──────────────────────────────── */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ─── Header ─────────────────────────────────── */
+#app-header {
+  height: var(--header-height);
+  min-height: var(--header-height);
+  background: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  z-index: var(--z-header);
+  flex-shrink: 0;
+  gap: var(--space-3);
+}
+
+/* ─── Logo ───────────────────────────────────── */
+.app-logo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+
+.app-logo .logo-icon {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-end));
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+/* ─── Document Name ──────────────────────────── */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+#doc-name-input {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  width: 190px;
+  padding: 4px var(--space-2);
+  transition: var(--transition-fast);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#doc-name-input:hover {
+  border-color: var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+#doc-name-input:focus {
+  border-color: var(--color-accent);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 0 0 3px var(--color-accent-muted);
+  outline: none;
+}
+
+/* ─── Header Center (Format Picker) ─────────── */
+.header-center {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  justify-content: center;
+}
+
+.page-format-group {
+  display: flex;
+  align-items: center;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+
+#page-format-select {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  padding: 4px 26px 4px 8px;
+  min-width: 100px;
+  box-shadow: none !important;
+}
+
+#page-format-select:focus {
+  box-shadow: none;
+  border: none;
+  outline: none;
+}
+
+/* ─── Orientation Button ─────────────────────── */
+#orientation-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  transition: var(--transition-fast);
+  font-size: 14px;
+  line-height: 1;
+}
+
+#orientation-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+#orientation-btn.landscape {
+  color: var(--color-accent);
+}
+
+#orientation-btn svg {
+  transition: transform 0.35s ease;
+}
+
+#orientation-btn.landscape svg {
+  transform: rotate(90deg);
+}
+
+/* Format display chip */
+.format-chip {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-muted);
+  border-radius: var(--radius-full);
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+
+/* ─── Header Right ───────────────────────────── */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+/* ─── Export Buttons ─────────────────────────── */
+.export-group {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-export {
+  padding: 5px 11px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--transition-fast);
+  font-family: var(--font-ui);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1;
+}
+
+.btn-export:active { transform: scale(0.97); }
+
+.btn-export-pdf {
+  background: linear-gradient(135deg, #c53030, #9b2c2c);
+  color: #fff;
+}
+
+.btn-export-pdf:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(197, 48, 48, 0.35);
+}
+
+.btn-export-docx {
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+  color: #fff;
+}
+
+.btn-export-docx:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px var(--color-accent-glow);
+}
+
+.btn-export-png {
+  background: linear-gradient(135deg, #059669, #0d9488);
+  color: #fff;
+}
+
+.btn-export-png:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35);
+}
+
+/* ─── Media Library Button ───────────────────── */
+#media-library-btn {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  font-family: var(--font-ui);
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: var(--transition-fast);
+}
+
+#media-library-btn:hover,
+#media-library-btn.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-muted);
+}
+
+/* ─── CKEditor Toolbar Bar ───────────────────── */
+#toolbar-bar {
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  min-height: var(--toolbar-height);
+  padding: 0 var(--space-2);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+#toolbar-bar::-webkit-scrollbar { height: 3px; }
+
+/* CKEditor overrides for dark theme */
+.ck.ck-toolbar {
+  background: transparent !important;
+  border: none !important;
+  padding: 2px 0 !important;
+}
+
+.ck.ck-toolbar__separator {
+  background: var(--color-border) !important;
+}
+
+.ck.ck-button {
+  color: var(--color-text-secondary) !important;
+  border-radius: var(--radius-sm) !important;
+  transition: var(--transition-fast) !important;
+}
+
+.ck.ck-button:not(.ck-disabled):hover,
+.ck.ck-button.ck-on {
+  background: var(--color-bg-hover) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ck.ck-button.ck-on {
+  border-color: var(--color-accent-muted) !important;
+}
+
+/* Dropdown panels */
+.ck.ck-dropdown .ck-dropdown__panel {
+  background: var(--color-bg-surface) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.ck.ck-list__item .ck-button {
+  color: var(--color-text-secondary) !important;
+}
+
+.ck.ck-list__item .ck-button:hover {
+  background: var(--color-bg-hover) !important;
+  color: var(--color-text-primary) !important;
+}
+
+.ck.ck-heading-dropdown .ck-list__item .ck-button.ck-on {
+  color: var(--color-accent) !important;
+}
+
+/* Input boxes in toolbar (font size etc.) */
+.ck.ck-input {
+  background: var(--color-bg-elevated) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text-primary) !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+/* ─── Main Area ──────────────────────────────── */
+#main-area {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ─── Workspace ──────────────────────────────── */
+#workspace {
+  flex: 1;
+  background: var(--color-workspace);
+  overflow-y: auto;
+  overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 48px 60px;
+  transition: margin-right 0.3s ease;
+  /* subtle dot grid pattern */
+  background-image: radial-gradient(circle, #21262d 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+#workspace.drawer-open {
+  margin-right: 320px;
+}
+
+/* ─── Page Sheet ─────────────────────────────── */
+#page-sheet {
+  width: var(--page-width);
+  min-height: var(--page-height);
+  background: var(--color-page);
+  box-shadow: var(--shadow-page);
+  box-sizing: border-box;
+  position: relative;
+  transition: width 0.3s ease, min-height 0.3s ease;
+  border-radius: 1px;
+}
+
+/* Page sheet enter animation */
+#page-sheet {
+  animation: page-appear 0.4s ease forwards;
+}
+
+@keyframes page-appear {
+  from { opacity: 0; transform: translateY(12px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── CKEditor Editable Area ─────────────────── */
+.ck.ck-editor__editable_inline {
+  min-height: calc(var(--page-height) - var(--page-pad-v) * 2 - 10px);
+  padding: var(--page-pad-v) var(--page-pad-h) !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-family: var(--font-document) !important;
+  font-size: 11pt !important;
+  line-height: 1.7 !important;
+  color: #1a202c !important;
+  background: transparent !important;
+}
+
+.ck.ck-editor__editable_inline:focus {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Cursor */
+.ck.ck-editor__editable_inline p { cursor: text; }
+
+/* ─── Document Typography ────────────────────── */
+.ck-content h1 {
+  font-size: 24pt;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 0 0 10pt;
+  color: #0f172a;
+  font-family: var(--font-document);
+}
+
+.ck-content h2 {
+  font-size: 18pt;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 14pt 0 7pt;
+  color: #1e293b;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4pt;
+}
+
+.ck-content h3 {
+  font-size: 13pt;
+  font-weight: 700;
+  margin: 10pt 0 5pt;
+  color: #334155;
+}
+
+.ck-content p {
+  margin: 0 0 7pt;
+  orphans: 3;
+  widows: 3;
+}
+
+.ck-content ul, .ck-content ol {
+  margin: 6pt 0 6pt 20pt;
+}
+
+.ck-content li { margin-bottom: 3pt; }
+
+.ck-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10pt 0;
+  font-size: 10.5pt;
+}
+
+.ck-content table th,
+.ck-content table td {
+  border: 1px solid #cbd5e1;
+  padding: 5pt 7pt;
+}
+
+.ck-content table th {
+  background: #f1f5f9;
+  font-weight: 600;
+  text-align: left;
+}
+
+.ck-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 2px;
+}
+
+.ck-content blockquote {
+  border-left: 3px solid #2563eb;
+  margin: 10pt 0;
+  padding: 6pt 14pt;
+  color: #475569;
+  background: #f8fafc;
+  border-radius: 0 4px 4px 0;
+  font-style: italic;
+}
+
+.ck-content a { color: #2563eb; }
+
+/* ─── Status Bar ─────────────────────────────── */
+#status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--statusbar-height);
+  background: var(--color-bg-surface);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  z-index: var(--z-header);
+  flex-shrink: 0;
+}
+
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#save-indicator.saving { color: var(--color-warning); }
+#save-indicator.saved  { color: var(--color-success); }
+
+/* ─── Print ──────────────────────────────────── */
+@media print {
+  #app-header, #toolbar-bar, #status-bar,
+  #media-drawer, .modal-overlay, #toast-container { display: none !important; }
+
+  body, html { height: auto; overflow: auto; }
+
+  #workspace {
+    padding: 0;
+    background: white;
+    overflow: visible;
+    display: block;
+    background-image: none;
+  }
+
+  #page-sheet {
+    box-shadow: none;
+    animation: none;
+  }
+
+  @page {
+    size: var(--page-width) var(--page-height);
+    margin: 0;
+  }
+}
