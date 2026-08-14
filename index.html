@@ -9,6 +9,7 @@
   <!-- Google Fonts (preconnect para performance) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap" rel="stylesheet" />
 
   <!-- CKEditor 5 Superbuild -->
   <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/super-build/ckeditor.js"></script>
@@ -112,6 +113,49 @@
 
   <!-- ─── TOOLBAR (CKEditor monta aqui) ────────────────── -->
   <div id="toolbar-bar" role="toolbar" aria-label="Barra de formatação"></div>
+
+  <!-- ─── DROPDOWN POPOVER DE LINK (Vintage Underground Comix) ── -->
+  <div id="toolbar-link-popover" class="toolbar-link-popover hidden" role="dialog" aria-label="Inserir Hiperlink">
+    <div class="popover-header">
+      <span>🔗 Inserir Hiperlink</span>
+      <button type="button" class="popover-close" onclick="EditorApp.closeLinkDropdown()" aria-label="Fechar">✕</button>
+    </div>
+    <div class="popover-body">
+      <div class="popover-row">
+        <label for="popover-link-text">Texto:</label>
+        <input type="text" id="popover-link-text" placeholder="Texto visível..." />
+      </div>
+      <div class="popover-row">
+        <label for="popover-link-url">URL:</label>
+        <input type="url" id="popover-link-url" placeholder="https://exemplo.com" />
+      </div>
+      <div class="popover-footer">
+        <label class="popover-blank-lbl">
+          <input type="checkbox" id="popover-link-blank" checked /> Nova aba
+        </label>
+        <div style="display:flex; gap:6px; margin-left:auto;">
+          <button type="button" id="popover-link-remove" class="btn-popover danger" style="display:none;" onclick="EditorApp.removeCurrentLink()">🗑 Remover</button>
+          <button type="button" class="btn-popover primary" onclick="EditorApp.applyLinkFromDropdown()">✓ Aplicar</button>
+        </div>
+      </div>
+    </div>
+  </div><!-- /toolbar-link-popover -->
+
+  <!-- ─── FLOATING LINK PREVIEW BALLOON (Abrir / Copiar / Editar / Excluir) ── -->
+  <div id="link-preview-balloon" class="link-preview-balloon hidden" role="tooltip">
+    <div class="balloon-content">
+      <a id="balloon-link-href" href="#" target="_blank" rel="noopener noreferrer" class="balloon-url" title="Clique para abrir o link em nova aba">
+        <span class="balloon-icon">🌐</span>
+        <span id="balloon-link-text" class="balloon-text">https://...</span>
+        <span class="balloon-ext">↗</span>
+      </a>
+      <div class="balloon-actions">
+        <button type="button" class="balloon-btn" onclick="EditorApp.copyActiveLink()" title="Copiar Link">📋 Copiar</button>
+        <button type="button" class="balloon-btn" onclick="EditorApp.editActiveLink()" title="Editar Link">✏️ Editar</button>
+        <button type="button" class="balloon-btn danger" onclick="EditorApp.removeActiveLink()" title="Remover Link">🗑️</button>
+      </div>
+    </div>
+  </div><!-- /link-preview-balloon -->
 
 
   <!-- ─── ÁREA PRINCIPAL ───────────────────────────────── -->
@@ -258,7 +302,40 @@
       <button class="btn btn-primary" onclick="App.applyCustomSize()">Aplicar</button>
     </div>
   </div>
-</div><!-- /custom-size-modal -->
+<!-- ═══════════════════════════════════════════════════════
+     MODAL — INSERIR / EDITAR HIPERLINK (Vintage Comix Edition)
+════════════════════════════════════════════════════════ -->
+<div id="link-modal" class="modal-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="link-modal-title">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="link-modal-title">🔗 Inserir Hiperlink</h3>
+      <button class="modal-close-btn" onclick="EditorApp.closeLinkModal()" aria-label="Fechar">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <label for="link-text-input">Texto de exibição</label>
+      <input id="link-text-input" type="text" placeholder="Texto visível no documento..." maxlength="100" />
+
+      <label for="link-url-input" style="margin-top: 10px;">Endereço da Web (URL)</label>
+      <input id="link-url-input" type="url" placeholder="https://exemplo.com" />
+
+      <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="link-target-blank" checked style="width:16px; height:16px; accent-color: var(--burnt-orange);" />
+        <label for="link-target-blank" style="margin-top:0; font-size:12px; font-weight:600; cursor:pointer;">
+          Abrir link em nova aba (_blank)
+        </label>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="EditorApp.closeLinkModal()">Cancelar</button>
+      <button id="link-remove-btn" class="btn" style="background:#C0392B; color:#fff; display:none;" onclick="EditorApp.removeCurrentLink()">🗑 Remover</button>
+      <button class="btn btn-primary" onclick="EditorApp.applyLink()">Inserir Link</button>
+    </div>
+  </div>
+</div><!-- /link-modal -->
+
 
 
 <!-- ─── Toast Container ───────────────────────────────── -->
@@ -464,11 +541,15 @@ const App = (() => {
   /* ── Fechar modal clicando fora ────────────────────────── */
   document.addEventListener('click', e => {
     if (e.target.id === 'custom-size-modal') closeCustomModal();
+    if (e.target.id === 'link-modal') EditorApp?.closeLinkModal?.();
   });
 
   /* ── Atalhos de teclado ────────────────────────────────── */
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeCustomModal();
+    if (e.key === 'Escape') {
+      closeCustomModal();
+      EditorApp?.closeLinkModal?.();
+    }
   });
 
   return { init, onFormatChange, toggleOrientation, openCustomModal, closeCustomModal, previewCustom, onCustomUnitChange, applyCustomSize };

@@ -286,19 +286,27 @@ select {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 17, 17, 0.75);
-  z-index: var(--z-modal);
-  display: flex;
+  background: rgba(17, 17, 17, 0.82);
+  z-index: 999999 !important;
+  display: flex !important;
   align-items: center;
   justify-content: center;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.22s ease;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
-.modal-overlay.active {
-  opacity: 1;
-  pointer-events: all;
+.modal-overlay.active,
+.modal-overlay.open {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: all !important;
+}
+
+.modal-overlay.active .modal,
+.modal-overlay.open .modal {
+  transform: scale(1) rotate(0deg) !important;
 }
 
 .modal {

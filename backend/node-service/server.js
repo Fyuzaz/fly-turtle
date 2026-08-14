@@ -129,32 +129,38 @@ app.post('/api/export/pdf', async (req, res) => {
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Special+Elite&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Courier+Prime&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap');
   @page { size: ${pageWidth}mm ${pageHeight}mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Merriweather', Georgia, serif;
     font-size: 11pt;
-    line-height: 1.7;
+    line-height: 1.75;
     color: #111111;
     background-color: #FFFDF5;
     width: ${pageWidth}mm;
     min-height: ${pageHeight}mm;
     padding: 25mm 20mm;
   }
-  h1 { font-family: 'Bangers', cursive; font-size: 26pt; font-weight: 400; letter-spacing: 0.04em; margin-bottom: 10pt; color: #111111; text-transform: uppercase; }
-  h2 { font-family: 'Bangers', cursive; font-size: 18pt; font-weight: 400; letter-spacing: 0.03em; margin: 14pt 0 7pt; border-bottom: 2px solid #111111; padding-bottom: 4pt; color: #111111; }
-  h3 { font-family: 'Bangers', cursive; font-size: 13pt; font-weight: 400; letter-spacing: 0.03em; margin: 10pt 0 5pt; color: #111111; }
-  p  { margin-bottom: 7pt; orphans: 3; widows: 3; }
-  ul, ol { margin: 6pt 0 6pt 20pt; }
-  li { margin-bottom: 3pt; }
-  table { width: 100%; border-collapse: collapse; margin: 10pt 0; font-size: 10.5pt; }
-  th, td { border: 2px solid #111111; padding: 5pt 7pt; }
-  th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 10pt; letter-spacing: 0.04em; }
-  img { max-width: 100%; height: auto; border: 2px solid #111111; }
-  blockquote { border-left: 4px solid #D95D39; margin: 10pt 0; padding: 6pt 14pt; color: #3a2e1e; background: rgba(217,93,57,0.06); font-style: italic; }
-  a { color: #D95D39; }
-  pre, code { font-family: 'Courier Prime', 'Courier New', monospace; background: #E8D9B8; padding: 2pt 5pt; border: 1px solid #111111; font-size: 10pt; }
+  h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 12pt 0 8pt; color: #111111; text-transform: uppercase; }
+  h2 { font-family: 'Bangers', cursive; font-size: 20pt; font-weight: 400; letter-spacing: 0.03em; margin: 16pt 0 8pt; border-bottom: 2px solid #111111; padding-bottom: 4pt; color: #111111; }
+  h3 { font-family: 'Bangers', cursive; font-size: 15pt; font-weight: 400; letter-spacing: 0.03em; margin: 12pt 0 6pt; color: #D95D39; }
+  h4 { font-family: 'Special Elite', serif; font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #3F5E4D; }
+  p  { margin-bottom: 8pt; orphans: 3; widows: 3; }
+  ul, ol { margin: 6pt 0 8pt 24pt; }
+  li { margin-bottom: 4pt; }
+  .todo-list { list-style: none; padding-left: 0; }
+  .todo-list li { display: flex; align-items: flex-start; gap: 8px; }
+  table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 2px solid #111111; }
+  th, td { border: 1px solid #111111; padding: 7pt 10pt; }
+  th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 11pt; letter-spacing: 0.04em; }
+  tr:nth-child(even) td { background: rgba(243, 233, 210, 0.4); }
+  img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; margin: 10px auto; }
+  blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; }
+  a { color: #D95D39; text-decoration: underline; }
+  pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
+  code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
+  hr { border: none; height: 3px; background: #111111; margin: 20pt 0; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 

@@ -1,7 +1,7 @@
 /**
  * image-resizer.js
  * Sistema Avançado de Mídia: Move Tool, Controle de Camadas (Z-Index / Frente & Trás),
- * Drag and Scale Interativo & Confinamento Estrito dentro da Folha do Documento
+ * Exclusão Precisa via Teclado (Delete / Backspace), Drag & Scale Interativo & Confinamento Estrito
  * "The Midnight Bat-Tortoise" Edition
  */
 
@@ -69,7 +69,7 @@ const ImageResizer = (() => {
         <button type="button" class="resizer-btn" data-action="align-right" title="Alinhar à Direita">➡</button>
         <button type="button" class="resizer-btn" data-action="size-50" title="50% da largura">50%</button>
         <button type="button" class="resizer-btn" data-action="size-100" title="Largura Total">100%</button>
-        <button type="button" class="resizer-btn danger" data-action="delete" title="Excluir Imagem">🗑</button>
+        <button type="button" class="resizer-btn danger" data-action="delete" title="Excluir Imagem (ou aperte Delete no teclado)">🗑</button>
       </div>
 
       <!-- Badge de tamanho, camada e modo -->
@@ -128,16 +128,19 @@ const ImageResizer = (() => {
     window.addEventListener('mousemove', _onMouseMove);
     window.addEventListener('mouseup', _onMouseUp);
 
-    // Teclado (Delete / Esc)
+    // Teclado (Delete / Backspace / Esc) - Captura em fase primária para impedir exclusão de caracteres
     window.addEventListener('keydown', e => {
       if (_activeImg) {
-        if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement === document.body) {
+        const isInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+        if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
+          e.preventDefault();
+          e.stopPropagation();
           _deleteActiveImage();
         } else if (e.key === 'Escape') {
           hideOverlay();
         }
       }
-    });
+    }, true);
   }
 
   /* ──────────────────────────────────────────────────────────
@@ -584,7 +587,6 @@ const ImageResizer = (() => {
       if (!parent) return;
       const next = targetEl.nextElementSibling;
       if (next) {
-        // Insere DEPOIS do elemento seguinte
         parent.insertBefore(targetEl, next.nextSibling);
         window.showToast?.('Imagem movida para baixo no texto', 'info');
       }
@@ -624,12 +626,29 @@ const ImageResizer = (() => {
     }
   }
 
+  /* ──────────────────────────────────────────────────────────
+     EXCLUIR IMAGEM SELECIONADA
+  ────────────────────────────────────────────────────────── */
   function _deleteActiveImage() {
     if (!_activeImg) return;
     const toRemove = _activeImg.closest('figure.image') || _activeImg;
+
+    // Se CKEditor estiver gerenciando o elemento, sincroniza remoção no Model
+    const editor = window.EditorApp?.getInstance();
+    if (editor && editor.model) {
+      try {
+        const modelElement = editor.editing?.mapper?.toModelElement(toRemove);
+        if (modelElement) {
+          editor.model.change(writer => {
+            writer.remove(modelElement);
+          });
+        }
+      } catch {}
+    }
+
     toRemove.remove();
     hideOverlay();
-    window.showToast?.('Imagem removida do documento', 'info');
+    window.showToast?.('🗑️ Imagem excluída do documento', 'info');
   }
 
   return { init, selectImage, hideOverlay, updatePosition: _updateOverlayPosition };
