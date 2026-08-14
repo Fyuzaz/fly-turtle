@@ -1,0 +1,128 @@
+# ═══════════════════════════════════════════════════════════
+#  .gitignore — WebDoc Editor
+#  Arquivos e pastas excluídos do controle de versão
+# ═══════════════════════════════════════════════════════════
+
+
+# ─── Dependências Node.js ───────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+
+# ─── Puppeteer — Chromium headless baixado localmente ───────
+# (~300 MB — não commitar, cada pessoa baixa ao fazer npm install)
+.local-chromium/
+.cache/puppeteer/
+backend/node-service/.local-chromium/
+backend/node-service/.cache/
+
+
+# ─── Variáveis de ambiente e segredos ───────────────────────
+# NUNCA commitar: senhas, chaves de API, tokens
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.staging
+*.secret
+secrets.json
+config.json
+credentials.json
+backend/node-service/.env
+backend/python-service/.env
+
+
+# ─── Biblioteca de Mídia (arquivos pessoais do usuário) ─────
+# Imagens, vídeos e outros arquivos carregados pelo usuário
+# NÃO devem ir para o repositório público
+media-library/
+uploads/
+
+
+# ─── Python — ambientes virtuais e bytecode ─────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.pycache
+venv/
+.venv/
+env/
+.env/
+ENV/
+backend/python-service/venv/
+backend/python-service/.venv/
+*.egg-info/
+dist/
+build/
+
+
+# ─── Logs e arquivos temporários ────────────────────────────
+logs/
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+
+# ─── Sistema Operacional ────────────────────────────────────
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+
+# ─── Editores e IDEs ────────────────────────────────────────
+# VS Code (exclui configs pessoais, mantém .vscode/extensions.json se quiser)
+.vscode/settings.json
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/*.code-snippets
+
+# JetBrains (WebStorm, PyCharm...)
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim/Neovim
+Session.vim
+*.session
+
+
+# ─── Arquivos de build/distribuição ─────────────────────────
+dist/
+out/
+.next/
+.nuxt/
+
+
+# ─── Testes e cobertura ─────────────────────────────────────
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/

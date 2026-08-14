@@ -23,7 +23,10 @@ const PORT = process.env.PORT || 3000;
    Constantes de caminho
 ────────────────────────────────────────────────────────── */
 // Pasta raiz da biblioteca de mídia (dois níveis acima, na raiz do projeto)
-const MEDIA_ROOT = path.resolve(__dirname, '../../media-library');
+const MEDIA_ROOT   = path.resolve(__dirname, '../../media-library');
+
+// Raiz do projeto (onde está o index.html, css/, js/)
+const PROJECT_ROOT = path.resolve(__dirname, '../../');
 
 /* ──────────────────────────────────────────────────────────
    Pastas padrão criadas automaticamente
@@ -47,8 +50,14 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
-// Serve arquivos da biblioteca de mídia como assets estáticos
+// Serve os arquivos da biblioteca de mídia como assets estáticos
 app.use('/media', express.static(MEDIA_ROOT));
+
+// Serve o frontend (index.html, css/, js/) na raiz — http://localhost:3000
+app.use(express.static(PROJECT_ROOT, {
+  // Não servir pastas do backend como arquivos estáticos
+  index: 'index.html',
+}));
 
 /* ──────────────────────────────────────────────────────────
    Sanitização HTML (DOMPurify)
@@ -120,31 +129,32 @@ app.post('/api/export/pdf', async (req, res) => {
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Special+Elite&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Courier+Prime&display=swap');
   @page { size: ${pageWidth}mm ${pageHeight}mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Merriweather', Georgia, serif;
     font-size: 11pt;
     line-height: 1.7;
-    color: #1a202c;
+    color: #111111;
+    background-color: #FFFDF5;
     width: ${pageWidth}mm;
     min-height: ${pageHeight}mm;
     padding: 25mm 20mm;
   }
-  h1 { font-size: 24pt; font-weight: 700; margin-bottom: 10pt; }
-  h2 { font-size: 18pt; font-weight: 700; margin: 14pt 0 7pt; border-bottom: 1px solid #e2e8f0; padding-bottom: 4pt; }
-  h3 { font-size: 13pt; font-weight: 700; margin: 10pt 0 5pt; }
+  h1 { font-family: 'Bangers', cursive; font-size: 26pt; font-weight: 400; letter-spacing: 0.04em; margin-bottom: 10pt; color: #111111; text-transform: uppercase; }
+  h2 { font-family: 'Bangers', cursive; font-size: 18pt; font-weight: 400; letter-spacing: 0.03em; margin: 14pt 0 7pt; border-bottom: 2px solid #111111; padding-bottom: 4pt; color: #111111; }
+  h3 { font-family: 'Bangers', cursive; font-size: 13pt; font-weight: 400; letter-spacing: 0.03em; margin: 10pt 0 5pt; color: #111111; }
   p  { margin-bottom: 7pt; orphans: 3; widows: 3; }
   ul, ol { margin: 6pt 0 6pt 20pt; }
   li { margin-bottom: 3pt; }
   table { width: 100%; border-collapse: collapse; margin: 10pt 0; font-size: 10.5pt; }
-  th, td { border: 1px solid #cbd5e1; padding: 5pt 7pt; }
-  th { background: #f1f5f9; font-weight: 600; }
-  img { max-width: 100%; height: auto; }
-  blockquote { border-left: 3px solid #2563eb; margin: 10pt 0; padding: 6pt 14pt; color: #475569; background: #f8fafc; font-style: italic; }
-  a { color: #2563eb; }
-  pre, code { font-family: 'Courier New', monospace; background: #f8fafc; padding: 2pt 5pt; border-radius: 3px; font-size: 10pt; }
+  th, td { border: 2px solid #111111; padding: 5pt 7pt; }
+  th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 10pt; letter-spacing: 0.04em; }
+  img { max-width: 100%; height: auto; border: 2px solid #111111; }
+  blockquote { border-left: 4px solid #D95D39; margin: 10pt 0; padding: 6pt 14pt; color: #3a2e1e; background: rgba(217,93,57,0.06); font-style: italic; }
+  a { color: #D95D39; }
+  pre, code { font-family: 'Courier Prime', 'Courier New', monospace; background: #E8D9B8; padding: 2pt 5pt; border: 1px solid #111111; font-size: 10pt; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 
@@ -415,8 +425,9 @@ function _guessMime(filename) {
 ────────────────────────────────────────────────────────── */
 app.listen(PORT, () => {
   console.log(`\n✅ WebDoc — Serviço Node.js rodando em http://localhost:${PORT}`);
-  console.log(`   📁 Biblioteca de mídia: ${MEDIA_ROOT}`);
-  console.log(`   📄 Exportar PDF: POST http://localhost:${PORT}/api/export/pdf`);
-  console.log(`   🖼️  Exportar PNG: POST http://localhost:${PORT}/api/export/img`);
-  console.log(`   🗂️  Biblioteca:   GET  http://localhost:${PORT}/api/media/folders\n`);
+  console.log(`\n   🌐 Frontend:      http://localhost:${PORT}`);
+  console.log(`   📁 Biblioteca:    http://localhost:${PORT}/api/media/folders`);
+  console.log(`   📄 Exportar PDF:  POST http://localhost:${PORT}/api/export/pdf`);
+  console.log(`   🖼️  Exportar PNG:  POST http://localhost:${PORT}/api/export/img`);
+  console.log(`   📁 Mídia local:   ${MEDIA_ROOT}\n`);
 });

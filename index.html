@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Editor web de documentos profissional com exportação para PDF, DOCX e PNG. Suporta múltiplos formatos de página e biblioteca de mídia integrada." />
-  <title>WebDoc — Editor de Documentos</title>
+  <meta name="description" content="WebDoc — Editor de documentos profissional com exportação para PDF, DOCX e PNG. Suporta múltiplos formatos de página e biblioteca de mídia integrada. Visual identity: The Midnight Bat-Tortoise." />
+  <title>WebDoc — The Midnight Bat-Tortoise</title>
 
   <!-- Google Fonts (preconnect para performance) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -30,9 +30,12 @@
 
     <!-- Esquerda: logo + nome do documento -->
     <div class="header-left">
-      <a class="app-logo" href="#" title="WebDoc — Editor de Documentos">
-        <div class="logo-icon">📄</div>
-        <span>WebDoc</span>
+      <a class="app-logo" href="#" title="WebDoc — The Midnight Bat-Tortoise Editor">
+        <img src="/assets/logo.jpg" alt="Midnight Bat-Tortoise" class="logo-img" />
+        <div class="logo-text">
+          <span class="logo-title">WebDoc</span>
+          <span class="logo-subtitle">The Midnight Bat-Tortoise</span>
+        </div>
       </a>
 
       <input
@@ -163,12 +166,17 @@
 
         <!-- Zona de upload -->
         <div id="upload-zone" class="upload-zone" role="button" tabindex="0"
-             aria-label="Clique ou arraste arquivos para fazer upload">
+             aria-label="Clique ou arraste arquivos para fazer upload no servidor">
+          <input type="file" id="media-file-input" style="display: none;" multiple accept="image/*,video/*" />
           <div class="upload-zone-icon">☁️</div>
           <div class="upload-zone-text">
             <strong>Clique ou arraste</strong> para enviar<br/>
-            <span class="upload-zone-hint">Imagens: JPG, PNG, GIF, WebP, SVG<br/>Vídeos: MP4, WebM</span>
+            <span class="upload-zone-hint">Imagens (PNG, JPG, WebP, SVG) ou Vídeos (MP4)</span>
           </div>
+          <button type="button" class="btn btn-primary" style="margin-top: 6px; font-size: 0.75rem; padding: 4px 10px;"
+                  onclick="event.stopPropagation(); MediaLibrary.triggerFileInput();">
+            📁 Escolher do Computador
+          </button>
           <div class="upload-progress" id="upload-progress">
             <div class="upload-progress-bar" id="upload-progress-bar"></div>
           </div>
@@ -263,6 +271,7 @@
 <script src="js/page-formats.js"></script>
 <script src="js/media-library.js"></script>
 <script src="js/upload-adapter.js"></script>
+<script src="js/image-resizer.js"></script>
 <script src="js/export.js"></script>
 <script src="js/editor.js"></script>
 
@@ -284,6 +293,15 @@ const App = (() => {
     // Escuta mudanças de formato
     window.addEventListener('pageFormatChanged',   e => _updateFormatChip(e.detail));
     window.addEventListener('customFormatsUpdated', () => _buildFormatSelector());
+
+    // Foco automático ao clicar na folha
+    document.getElementById('page-sheet')?.addEventListener('click', e => {
+      if (e.target.id === 'page-sheet') {
+        const ed = EditorApp.getInstance();
+        if (ed) ed.editing?.view?.focus();
+        else document.getElementById('editor')?.focus();
+      }
+    });
 
     // Salva nome do documento
     document.getElementById('doc-name-input')?.addEventListener('change', e => {

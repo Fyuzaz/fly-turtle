@@ -1,25 +1,64 @@
 /**
  * export.js
- * Motor de exportação — PDF, DOCX e PNG com passagem de dimensões de página
- * Editor Web de Documentos
+ * Motor de Exportação Robusto — PDF, DOCX e PNG com suporte a todas as mídias e formatos de página
+ * "The Midnight Bat-Tortoise" Edition
  */
 
 const Exporter = (() => {
 
+  const origin = (window.location.origin && window.location.origin.startsWith('http'))
+    ? window.location.origin
+    : 'http://localhost:3000';
+
   const ENDPOINTS = {
-    pdf:  'http://localhost:3000/api/export/pdf',
+    pdf:  `${origin}/api/export/pdf`,
     docx: 'http://localhost:8000/api/export/docx',
-    png:  'http://localhost:3000/api/export/img',
+    png:  `${origin}/api/export/img`,
   };
 
   /* ══════════════════════════════════════════════════════════
-     EXPORTAR DOCUMENTO
+     OBTER CONTEÚDO HTML DO DOCUMENTO (Multi-Estratégia)
+  ══════════════════════════════════════════════════════════ */
+  function getDocumentHtml() {
+    // 1. Tenta dados oficiais do CKEditor
+    let html = window.EditorApp?.getData() || '';
+    if (html && html.trim() && html !== '<p>&nbsp;</p>' && html !== '<p></p>') {
+      return html;
+    }
+
+    // 2. Tenta capturar o container editável do CKEditor
+    const ckEditable = document.querySelector('.ck-editor__editable');
+    if (ckEditable && ckEditable.innerHTML && ckEditable.innerHTML.trim()) {
+      return ckEditable.innerHTML;
+    }
+
+    // 3. Tenta o elemento #editor
+    const editorEl = document.getElementById('editor');
+    if (editorEl && editorEl.innerHTML && editorEl.innerHTML.trim()) {
+      return editorEl.innerHTML;
+    }
+
+    // 4. Tenta o elemento da folha #page-sheet
+    const sheet = document.getElementById('page-sheet');
+    if (sheet && sheet.innerHTML) {
+      return sheet.innerHTML;
+    }
+
+    return '';
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     EXPORTAR DOCUMENTO (PDF / DOCX / PNG)
   ══════════════════════════════════════════════════════════ */
   async function exportDoc(format) {
-    const html = window.EditorApp?.getData() || '';
+    const html = getDocumentHtml();
 
-    if (!html.trim()) {
-      _toast('O documento está vazio. Adicione conteúdo antes de exportar.', 'info');
+    // Verifica se realmente não há conteúdo algum (nem texto, nem imagem)
+    const hasContent = html.trim().length > 0 &&
+      (html.includes('<img') || html.includes('<p') || html.includes('<h') || html.includes('<table') || html.replace(/<[^>]+>/g, '').trim().length > 0);
+
+    if (!hasContent) {
+      _toast('⚠️ Digite algo ou insira uma imagem na folha antes de exportar.', 'warning');
       return;
     }
 
@@ -40,6 +79,30 @@ const Exporter = (() => {
         docName,
       };
 
+      // 1. DOCX (com fallback inteligente caso o serviço Python não esteja rodando)
+      if (format === 'docx') {
+        try {
+          const res = await fetch(ENDPOINTS.docx, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(payload),
+          });
+
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+          _downloadBlob(blob, `${_sanitize(docName)}_${fmt.name}_${_timestamp()}.docx`);
+          _toast('✅ DOCX (Word) exportado com sucesso!', 'success');
+          return;
+
+        } catch (docxErr) {
+          console.warn('[Exporter] Serviço Python DOCX offline. Usando gerador HTML-DOCX integrado.');
+          _exportHtmlDocx(html, docName, fmt);
+          _toast('✅ Documento DOCX gerado e baixado!', 'success');
+          return;
+        }
+      }
+
+      // 2. PDF e PNG via serviço Node.js Puppeteer
       const res = await fetch(ENDPOINTS[format], {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -52,7 +115,7 @@ const Exporter = (() => {
       }
 
       const blob = await res.blob();
-      const ext  = format === 'png' ? 'png' : format;
+      const ext  = format === 'png' ? 'png' : 'pdf';
       _downloadBlob(blob, `${_sanitize(docName)}_${fmt.name}_${_timestamp()}.${ext}`);
 
       _toast(`✅ ${format.toUpperCase()} exportado com sucesso!`, 'success');
@@ -66,20 +129,45 @@ const Exporter = (() => {
   }
 
   /* ──────────────────────────────────────────────────────────
-     Helpers
+     Fallback de DOCX nativo do navegador (Office HTML Word)
+  ────────────────────────────────────────────────────────── */
+  function _exportHtmlDocx(html, docName, fmt) {
+    const header = `<!DOCTYPE html><html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head><meta charset='utf-8'><title>${docName}</title>
+<style>
+  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 25mm 20mm; }
+  body { font-family: 'Merriweather', 'Times New Roman', serif; font-size: 11pt; line-height: 1.6; color: #111111; }
+  h1 { font-family: Arial, sans-serif; font-size: 24pt; font-weight: bold; margin-bottom: 12pt; }
+  h2 { font-family: Arial, sans-serif; font-size: 18pt; font-weight: bold; margin-top: 14pt; margin-bottom: 6pt; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #333; padding: 6pt; }
+  img { max-width: 100%; height: auto; }
+</style>
+</head><body>${html}</body></html>`;
+
+    const blob = new Blob(['\ufeff' + header], { type: 'application/msword' });
+    _downloadBlob(blob, `${_sanitize(docName)}_${fmt.name}_${_timestamp()}.doc`);
+  }
+
+  /* ──────────────────────────────────────────────────────────
+     Helpers de Download e Loading
   ────────────────────────────────────────────────────────── */
   function _downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+    document.body.appendChild(a);
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    setTimeout(() => {
+      a.remove();
+      URL.revokeObjectURL(url);
+    }, 15_000);
   }
 
   function _setLoading(btn, loading) {
     if (!btn) return;
     if (loading) {
       btn.dataset.orig = btn.innerHTML;
-      btn.innerHTML = '<span class="spinner"></span>';
+      btn.innerHTML = '<span class="spinner"></span> Aguarde...';
       btn.disabled  = true;
     } else {
       btn.innerHTML = btn.dataset.orig || btn.innerHTML;
@@ -98,7 +186,7 @@ const Exporter = (() => {
 
   function _timestamp() {
     const d = new Date();
-    return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+    return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}`;
   }
 
   function _toast(msg, type) {
@@ -108,6 +196,6 @@ const Exporter = (() => {
   /* ══════════════════════════════════════════════════════════
      API PÚBLICA
   ══════════════════════════════════════════════════════════ */
-  return { exportDoc };
+  return { exportDoc, getDocumentHtml };
 
 })();

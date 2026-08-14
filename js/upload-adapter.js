@@ -1,19 +1,22 @@
 /**
  * upload-adapter.js
  * CKEditor 5 Custom Upload Adapter
- * Integrado com a Biblioteca de Mídia — upload profissional com fallback Base64
+ * Integrado com a Biblioteca de Mídia — upload no servidor com fallback Base64
  */
 
 class UploadAdapter {
   constructor(loader) {
     this.loader  = loader;
-    this.API_URL = 'http://localhost:3000/api/media/upload';
+    const origin = (window.location.origin && window.location.origin.startsWith('http'))
+      ? window.location.origin
+      : 'http://localhost:3000';
+    this.API_URL = `${origin}/api/media/upload`;
     this.xhr     = null;
   }
 
   upload() {
     return this.loader.file.then(file => new Promise((resolve, reject) => {
-      // Detecta pasta ativa na gaveta de mídia
+      // Detecta pasta ativa na gaveta de mídia ou usa 'Imagens'
       const folderEl = document.querySelector('.folder-item.active');
       const folder   = folderEl?.dataset?.name || 'Imagens';
 
@@ -34,11 +37,9 @@ class UploadAdapter {
             const resp = JSON.parse(this.xhr.response);
             resolve({ default: resp.url });
 
-            // Atualiza a gaveta de mídia se estiver aberta
-            const drawer = document.getElementById('media-drawer');
-            if (drawer?.classList.contains('open')) {
-              window.MediaLibrary?.loadFiles(folder);
-            }
+            // Atualiza a gaveta de mídia se estiver visível
+            window.MediaLibrary?.loadFiles(folder);
+            window.showToast?.(`"${file.name}" salva no servidor!`, 'success');
           } catch {
             reject('Resposta inválida do servidor.');
           }
@@ -50,7 +51,7 @@ class UploadAdapter {
       });
 
       this.xhr.addEventListener('error', () => {
-        console.warn('[UploadAdapter] Servidor indisponível — usando fallback Base64.');
+        console.warn('[UploadAdapter] Servidor offline — usando fallback Base64.');
         this._base64(file).then(resolve).catch(reject);
       });
 
@@ -65,7 +66,7 @@ class UploadAdapter {
     this.xhr?.abort();
   }
 
-  /** Converte o arquivo para Base64 — usado quando o servidor está offline */
+  /** Converte o arquivo para Base64 — fallback caso o backend não esteja acessível */
   _base64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();

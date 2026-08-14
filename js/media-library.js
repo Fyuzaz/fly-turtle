@@ -1,28 +1,32 @@
 /**
  * media-library.js
  * Gaveta de Mídia — gerenciamento de pastas, upload, preview e inserção no editor
- * Editor Web de Documentos
+ * "The Midnight Bat-Tortoise" Edition
  */
 
 const MediaLibrary = (() => {
 
-  const API = 'http://localhost:3000';
+  // Resolve dinamicamente a URL base da API
+  const API = (window.location.origin && window.location.origin.startsWith('http'))
+    ? window.location.origin
+    : 'http://localhost:3000';
+
   const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|svg|bmp)$/i;
   const VIDEO_EXTS = /\.(mp4|webm|ogv|mov)$/i;
 
   /* ──────────────────────────────────────────────────────────
      Estado interno
   ────────────────────────────────────────────────────────── */
-  let _editor       = null;   // CKEditor instance
-  let _folder       = null;   // pasta ativa
-  let _allFiles     = [];     // cache da listagem
-  let _isOpen       = false;
+  let _editor       = null;      // Instância do CKEditor
+  let _folder       = 'Imagens'; // Pasta ativa padrão
+  let _allFiles     = [];        // Cache da listagem de arquivos
+  let _isOpen       = false;     // Estado da gaveta lateral
 
   /* ──────────────────────────────────────────────────────────
      Inicialização
   ────────────────────────────────────────────────────────── */
   function init(editorInstance) {
-    _editor = editorInstance;
+    if (editorInstance) _editor = editorInstance;
     _setupDragDrop();
     _setupSearch();
     loadFolders();
@@ -32,17 +36,26 @@ const MediaLibrary = (() => {
      DRAWER (Abrir / Fechar)
   ══════════════════════════════════════════════════════════ */
   function openDrawer() {
-    document.getElementById('media-drawer')?.classList.add('open');
-    document.getElementById('workspace')?.classList.add('drawer-open');
-    document.getElementById('media-library-btn')?.classList.add('active');
+    const drawer = document.getElementById('media-drawer');
+    const ws     = document.getElementById('workspace');
+    const btn    = document.getElementById('media-library-btn');
+
+    drawer?.classList.add('open');
+    ws?.classList.add('drawer-open');
+    btn?.classList.add('active');
     _isOpen = true;
-    if (!_folder) loadFolders();
+
+    loadFolders();
   }
 
   function closeDrawer() {
-    document.getElementById('media-drawer')?.classList.remove('open');
-    document.getElementById('workspace')?.classList.remove('drawer-open');
-    document.getElementById('media-library-btn')?.classList.remove('active');
+    const drawer = document.getElementById('media-drawer');
+    const ws     = document.getElementById('workspace');
+    const btn    = document.getElementById('media-library-btn');
+
+    drawer?.classList.remove('open');
+    ws?.classList.remove('drawer-open');
+    btn?.classList.remove('active');
     _isOpen = false;
   }
 
@@ -55,15 +68,21 @@ const MediaLibrary = (() => {
   ══════════════════════════════════════════════════════════ */
   async function loadFolders() {
     try {
-      const res  = await fetch(`${API}/api/media/folders`);
+      const res = await fetch(`${API}/api/media/folders`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      _renderFolders(data.folders || []);
+      const folders = data.folders || [];
+      _renderFolders(folders);
 
-      // Seleciona automaticamente a primeira pasta
-      if ((data.folders || []).length > 0 && !_folder) {
-        selectFolder(data.folders[0].name);
+      // Garante uma pasta selecionada
+      if (folders.length > 0) {
+        const found = folders.find(f => f.name === _folder);
+        selectFolder(found ? found.name : folders[0].name);
+      } else {
+        selectFolder('Imagens');
       }
-    } catch {
+    } catch (err) {
+      console.warn('[MediaLibrary] Falha ao carregar pastas:', err);
       _showOfflineNotice();
     }
   }
@@ -93,62 +112,72 @@ const MediaLibrary = (() => {
   }
 
   function selectFolder(name) {
-    _folder = name;
+    _folder = name || 'Imagens';
     document.querySelectorAll('.folder-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.name === name);
+      el.classList.toggle('active', el.dataset.name === _folder);
     });
-    loadFiles(name);
+    loadFiles(_folder);
   }
 
   async function createFolder(name) {
     const n = (name || '').trim();
     if (!n) return;
     try {
-      await fetch(`${API}/api/media/folder`, {
+      const res = await fetch(`${API}/api/media/folder`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ name: n }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await loadFolders();
       selectFolder(n);
-      _toast(`Pasta "${n}" criada!`, 'success');
-    } catch { _toast('Erro ao criar pasta', 'error'); }
+      _toast(`Pasta "${n}" criada com sucesso!`, 'success');
+    } catch {
+      _toast('Erro ao criar pasta no servidor', 'error');
+    }
   }
 
   async function promptRename(oldName) {
-    const newName = prompt(`Novo nome para "${oldName}":`, oldName);
+    const newName = prompt(`Novo nome para a pasta "${oldName}":`, oldName);
     if (!newName || newName.trim() === oldName) return;
     try {
-      await fetch(`${API}/api/media/folder`, {
+      const res = await fetch(`${API}/api/media/folder`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ old: oldName, new: newName.trim() }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       if (_folder === oldName) _folder = newName.trim();
       await loadFolders();
       _toast('Pasta renomeada!', 'success');
-    } catch { _toast('Erro ao renomear', 'error'); }
+    } catch {
+      _toast('Erro ao renomear pasta', 'error');
+    }
   }
 
   async function promptDelete(name) {
     if (!confirm(`Excluir a pasta "${name}" e todos os arquivos dentro dela?`)) return;
     try {
-      await fetch(`${API}/api/media/folder`, {
+      const res = await fetch(`${API}/api/media/folder`, {
         method:  'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ name }),
       });
-      if (_folder === name) _folder = null;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (_folder === name) _folder = 'Imagens';
       await loadFolders();
-      _toast('Pasta excluída', 'success');
-    } catch { _toast('Erro ao excluir pasta', 'error'); }
+      _toast('Pasta excluída!', 'success');
+    } catch {
+      _toast('Erro ao excluir pasta', 'error');
+    }
   }
 
   function showCreateFolderInput() {
     const list = document.getElementById('folder-list');
     if (!list) return;
     if (list.querySelector('.folder-input-row')) {
-      list.querySelector('.folder-input-row input')?.focus(); return;
+      list.querySelector('.folder-input-row input')?.focus();
+      return;
     }
 
     const li = document.createElement('li');
@@ -162,7 +191,12 @@ const MediaLibrary = (() => {
     const inp = li.querySelector('input');
     inp.focus();
 
-    const confirm_ = () => { createFolder(inp.value); li.remove(); };
+    const confirm_ = () => {
+      const val = inp.value.trim();
+      if (val) createFolder(val);
+      li.remove();
+    };
+
     li.querySelector('.folder-confirm-btn').addEventListener('click', confirm_);
     li.querySelector('.folder-cancel-btn').addEventListener('click', () => li.remove());
     inp.addEventListener('keydown', e => {
@@ -172,22 +206,28 @@ const MediaLibrary = (() => {
   }
 
   /* ══════════════════════════════════════════════════════════
-     ARQUIVOS
+     ARQUIVOS (Listagem & Ações)
   ══════════════════════════════════════════════════════════ */
   async function loadFiles(folder) {
     const grid = document.getElementById('files-grid');
     if (!grid) return;
     grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">⏳</span>Carregando...</div>';
 
+    const targetFolder = folder || _folder || 'Imagens';
+
     try {
-      const res  = await fetch(`${API}/api/media/files?folder=${encodeURIComponent(folder)}`);
+      const res = await fetch(`${API}/api/media/files?folder=${encodeURIComponent(targetFolder)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       _allFiles = data.files || [];
       _renderFiles(_allFiles);
+
       const countEl = document.getElementById('files-count');
-      if (countEl) countEl.textContent = `${_allFiles.length} arquivo${_allFiles.length !== 1 ? 's' : ''}`;
+      if (countEl) {
+        countEl.textContent = `${_allFiles.length} arquivo${_allFiles.length !== 1 ? 's' : ''}`;
+      }
     } catch {
-      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">❌</span>Erro ao carregar arquivos.</div>';
+      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">❌</span>Não foi possível carregar arquivos.</div>';
     }
   }
 
@@ -197,7 +237,7 @@ const MediaLibrary = (() => {
     grid.innerHTML = '';
 
     if (!files.length) {
-      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">📂</span>Nenhum arquivo aqui.<br/>Arraste ou clique na zona de upload.</div>';
+      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">📂</span>Nenhum arquivo nesta pasta.<br/>Clique na área acima para enviar!</div>';
       return;
     }
 
@@ -239,47 +279,89 @@ const MediaLibrary = (() => {
   }
 
   async function deleteFile(folder, filename) {
-    if (!confirm(`Excluir "${filename}"?`)) return;
+    if (!confirm(`Excluir o arquivo "${filename}" do servidor?`)) return;
     try {
-      await fetch(`${API}/api/media/file`, {
+      const res = await fetch(`${API}/api/media/file`, {
         method:  'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ folder, filename }),
+        body:    JSON.stringify({ folder: folder || _folder, filename }),
       });
-      await loadFiles(folder);
-      _toast('Arquivo excluído', 'success');
-    } catch { _toast('Erro ao excluir arquivo', 'error'); }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadFiles(folder || _folder);
+      _toast('Arquivo excluído com sucesso!', 'success');
+    } catch {
+      _toast('Erro ao excluir arquivo', 'error');
+    }
   }
 
   /* ══════════════════════════════════════════════════════════
-     UPLOAD
+     UPLOAD (Drag & Drop + File Input Direto)
   ══════════════════════════════════════════════════════════ */
-  function _setupDragDrop() {
-    const zone = document.getElementById('upload-zone');
-    if (!zone) return;
-
-    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
-    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-    zone.addEventListener('drop', e => {
-      e.preventDefault();
-      zone.classList.remove('drag-over');
-      [...e.dataTransfer.files].forEach(uploadFile);
-    });
-
-    zone.addEventListener('click', () => {
+  function triggerFileInput() {
+    const fileInput = document.getElementById('media-file-input');
+    if (fileInput) {
+      fileInput.click();
+    } else {
       const inp = document.createElement('input');
       inp.type = 'file';
       inp.multiple = true;
       inp.accept = 'image/*,video/*';
-      inp.onchange = e => [...e.target.files].forEach(uploadFile);
+      inp.onchange = e => {
+        const files = Array.from(e.target.files || []);
+        files.forEach(uploadFile);
+      };
       inp.click();
-    });
+    }
+  }
+
+  function _setupDragDrop() {
+    const zone = document.getElementById('upload-zone');
+    const fileInput = document.getElementById('media-file-input');
+
+    if (fileInput) {
+      fileInput.onchange = e => {
+        const files = Array.from(e.target.files || []);
+        files.forEach(uploadFile);
+        fileInput.value = '';
+      };
+    }
+
+    if (zone) {
+      zone.ondragover = e => {
+        e.preventDefault();
+        zone.classList.add('drag-over');
+      };
+
+      zone.ondragleave = e => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+      };
+
+      zone.ondrop = e => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        const files = Array.from(e.dataTransfer.files || []);
+        if (files.length > 0) {
+          files.forEach(uploadFile);
+        }
+      };
+
+      zone.onclick = e => {
+        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+          triggerFileInput();
+        }
+      };
+    }
   }
 
   async function uploadFile(file) {
-    if (!_folder) { _toast('Selecione uma pasta antes de fazer upload.', 'warning'); return; }
+    if (!file) return;
+
+    const targetFolder = _folder || 'Imagens';
+
     if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-      _toast(`Tipo não suportado: ${file.type}`, 'error'); return;
+      _toast(`Formato não suportado: ${file.name}`, 'error');
+      return;
     }
 
     const pb   = document.getElementById('upload-progress-bar');
@@ -290,47 +372,132 @@ const MediaLibrary = (() => {
     try {
       const fd = new FormData();
       fd.append('file', file);
-      fd.append('folder', _folder);
+      fd.append('folder', targetFolder);
 
       if (pb) pb.style.width = '70%';
-      const res = await fetch(`${API}/api/media/upload`, { method: 'POST', body: fd });
+
+      const res = await fetch(`${API}/api/media/upload`, {
+        method: 'POST',
+        body:   fd,
+      });
+
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
 
       if (pb) pb.style.width = '100%';
       setTimeout(() => {
         if (wrap) wrap.style.display = 'none';
         if (pb)   pb.style.width = '0%';
-      }, 600);
+      }, 500);
 
-      await loadFiles(_folder);
-      _toast(`"${file.name}" enviado com sucesso!`, 'success');
+      await loadFiles(targetFolder);
+      _toast(`"${file.name}" salva no servidor!`, 'success');
+
+      return data;
     } catch (err) {
       if (wrap) wrap.style.display = 'none';
-      _toast(`Falha ao enviar "${file.name}"`, 'error');
-      console.error('[MediaLibrary] Upload error:', err);
+      _toast(`Falha no upload de "${file.name}"`, 'error');
+      console.error('[MediaLibrary] Erro de upload:', err);
     }
   }
 
   /* ══════════════════════════════════════════════════════════
-     INSERIR NO EDITOR
+     INSERIR NO DOCUMENTO (Multi-engine: CKEditor 5 + Fallback)
   ══════════════════════════════════════════════════════════ */
   function insertIntoEditor(url, type = 'image') {
-    if (!_editor) { _toast('Editor não iniciado', 'error'); return; }
+    const editor = _editor || window.EditorApp?.getInstance();
 
     if (type === 'image') {
-      _editor.model.change(writer => {
-        const img = writer.createElement('imageBlock', { src: url });
-        _editor.model.insertContent(img, _editor.model.document.selection);
-      });
-      _toast('Imagem inserida no documento!', 'success');
+      let inserted = false;
+
+      // 1. Tenta método nativo do CKEditor 5
+      if (editor && editor.model) {
+        try {
+          editor.editing?.view?.focus();
+
+          // Tenta comando insertImage
+          if (editor.commands?.get('insertImage')?.isEnabled !== false) {
+            try {
+              editor.execute('insertImage', { source: url });
+              inserted = true;
+            } catch (e1) {
+              console.warn('[MediaLibrary] execute(insertImage) falhou:', e1);
+            }
+          }
+
+          // Se comando não executou, insere direto no Model
+          if (!inserted) {
+            editor.model.change(writer => {
+              const imageElement = writer.createElement('imageBlock', { src: url });
+              editor.model.insertContent(imageElement, editor.model.document.selection);
+              inserted = true;
+            });
+          }
+        } catch (ckErr) {
+          console.warn('[MediaLibrary] CKEditor model insert falhou:', ckErr);
+        }
+      }
+
+      // 2. Fallback direto no DOM (HTML nativo ou se CKEditor estiver indisponível)
+      if (!inserted) {
+        const editableEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+        if (editableEl) {
+          editableEl.focus();
+          const img = document.createElement('img');
+          img.src = url;
+          img.alt = 'Imagem inserida';
+          img.style.maxWidth = '100%';
+          img.style.height = 'auto';
+          img.style.margin = '10px 0';
+          img.style.display = 'block';
+
+          // Insere na seleção atual do usuário se houver, ou no final do editor
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0 && editableEl.contains(sel.anchorNode)) {
+            const range = sel.getRangeAt(0);
+            range.collapse(false);
+            range.insertNode(img);
+            range.collapse(false);
+          } else {
+            editableEl.appendChild(img);
+          }
+          inserted = true;
+        }
+      }
+
+      if (inserted) {
+        _toast('✅ Imagem inserida no documento!', 'success');
+      } else {
+        _toast('Erro ao inserir imagem no documento', 'error');
+      }
+
     } else {
-      // Vídeo: insere como link anotado
-      const text = `[Vídeo] ${url}`;
-      _editor.model.change(writer => {
-        const pos = _editor.model.document.selection.getFirstPosition();
-        writer.insertText(text, pos);
-      });
-      _toast('Referência de vídeo inserida!', 'info');
+      // Inserção de link/vídeo
+      let inserted = false;
+      if (editor && editor.model) {
+        try {
+          editor.editing?.view?.focus();
+          editor.model.change(writer => {
+            const pos = editor.model.document.selection.getFirstPosition();
+            writer.insertText(` [Vídeo: ${url}] `, pos);
+            inserted = true;
+          });
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+
+      if (!inserted) {
+        const editableEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+        if (editableEl) {
+          const p = document.createElement('p');
+          p.innerHTML = `🎥 <a href="${url}" target="_blank" style="color:var(--burnt-orange)">Vídeo: ${url}</a>`;
+          editableEl.appendChild(p);
+          inserted = true;
+        }
+      }
+
+      if (inserted) _toast('Referência de vídeo inserida!', 'info');
     }
   }
 
@@ -343,12 +510,12 @@ const MediaLibrary = (() => {
     let debounce;
     inp.addEventListener('input', () => {
       clearTimeout(debounce);
-      debounce = setTimeout(() => filterFiles(inp.value), 200);
+      debounce = setTimeout(() => filterFiles(inp.value), 180);
     });
   }
 
   /* ──────────────────────────────────────────────────────────
-     Modo offline
+     Modo Offline / Feedback
   ────────────────────────────────────────────────────────── */
   function _showOfflineNotice() {
     const body = document.querySelector('.drawer-body');
@@ -358,7 +525,7 @@ const MediaLibrary = (() => {
 
     const notice = document.createElement('div');
     notice.className = 'drawer-offline-notice';
-    notice.innerHTML = `⚠️ <strong>Serviço offline.</strong><br/>Inicie o backend Node.js para usar a biblioteca de mídia.`;
+    notice.innerHTML = `⚠️ <strong>Serviço de Mídia Desconectado.</strong><br/>Certifique-se de que o servidor Node.js está rodando em <code>http://localhost:3000</code>.`;
     body.prepend(notice);
   }
 
@@ -366,11 +533,11 @@ const MediaLibrary = (() => {
      Utilitários
   ────────────────────────────────────────────────────────── */
   function _esc(str) {
-    return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
   function _escAttr(str) {
-    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   }
 
   function _toast(msg, type) {
@@ -392,6 +559,7 @@ const MediaLibrary = (() => {
     showCreateFolderInput,
     promptRename,
     promptDelete,
+    triggerFileInput,
     uploadFile,
     deleteFile,
     filterFiles,
@@ -399,3 +567,8 @@ const MediaLibrary = (() => {
   };
 
 })();
+
+// Auto-inicializa os listeners do DOM assim que carregado
+document.addEventListener('DOMContentLoaded', () => {
+  MediaLibrary.init(null);
+});
