@@ -371,14 +371,15 @@ const MediaLibrary = (() => {
 
     try {
       const fd = new FormData();
-      fd.append('file', file);
       fd.append('folder', targetFolder);
+      fd.append('file', file);
 
       if (pb) pb.style.width = '70%';
 
-      const res = await fetch(`${API}/api/media/upload`, {
-        method: 'POST',
-        body:   fd,
+      const res = await fetch(`${API}/api/media/upload?folder=${encodeURIComponent(targetFolder)}`, {
+        method:  'POST',
+        headers: { 'x-folder': encodeURIComponent(targetFolder) },
+        body:    fd,
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

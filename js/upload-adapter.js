@@ -21,7 +21,8 @@ class UploadAdapter {
       const folder   = folderEl?.dataset?.name || 'Imagens';
 
       this.xhr = new XMLHttpRequest();
-      this.xhr.open('POST', this.API_URL);
+      this.xhr.open('POST', `${this.API_URL}?folder=${encodeURIComponent(folder)}`);
+      this.xhr.setRequestHeader('x-folder', encodeURIComponent(folder));
 
       // Progresso de upload
       this.xhr.upload.addEventListener('progress', evt => {
@@ -56,8 +57,8 @@ class UploadAdapter {
       });
 
       const fd = new FormData();
-      fd.append('file', file);
       fd.append('folder', folder);
+      fd.append('file', file);
       this.xhr.send(fd);
     }));
   }

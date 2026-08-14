@@ -82,11 +82,12 @@ function sanitize(html) {
 }
 
 /* ──────────────────────────────────────────────────────────
-   Multer — Upload de mídia
+   Multer — Upload de mídia com suporte a todas as pastas
 ────────────────────────────────────────────────────────── */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const folder = (req.body.folder || 'Imagens').replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '');
+    const folderParam = req.query.folder || req.headers['x-folder'] || req.body?.folder || 'Imagens';
+    const folder = decodeURIComponent(folderParam).replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '').trim() || 'Imagens';
     const dir    = path.join(MEDIA_ROOT, folder);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     cb(null, dir);
@@ -376,13 +377,15 @@ app.get('/api/media/files', (req, res) => {
 app.post('/api/media/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo recebido.' });
 
-  const folder  = (req.body.folder || 'Imagens').replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '');
-  const fileUrl = `http://localhost:${PORT}/media/${encodeURIComponent(folder)}/${encodeURIComponent(req.file.filename)}`;
+  const folderParam = req.query.folder || req.headers['x-folder'] || req.body?.folder || 'Imagens';
+  const folder      = decodeURIComponent(folderParam).replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '').trim() || 'Imagens';
+  const fileUrl     = `http://localhost:${PORT}/media/${encodeURIComponent(folder)}/${encodeURIComponent(req.file.filename)}`;
 
   res.json({
     ok:       true,
     url:      fileUrl,
     filename: req.file.filename,
+    folder:   folder,
     size:     req.file.size,
     mimetype: req.file.mimetype,
   });
