@@ -211,16 +211,15 @@
         <!-- Zona de upload -->
         <div id="upload-zone" class="upload-zone" role="button" tabindex="0"
              aria-label="Clique ou arraste arquivos para fazer upload no servidor">
-          <input type="file" id="media-file-input" style="display: none;" multiple accept="image/*,video/*" />
+          <input type="file" id="media-file-input" onchange="MediaLibrary.handleFileSelect(event)" style="position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none;" multiple accept="image/*,video/*,.jfif,.heic,.avif,.webp,.svg,.png,.jpg,.jpeg" />
           <div class="upload-zone-icon">☁️</div>
           <div class="upload-zone-text">
             <strong>Clique ou arraste</strong> para enviar<br/>
             <span class="upload-zone-hint">Imagens (PNG, JPG, WebP, SVG) ou Vídeos (MP4)</span>
           </div>
-          <button type="button" class="btn btn-primary" style="margin-top: 6px; font-size: 0.75rem; padding: 4px 10px;"
-                  onclick="event.stopPropagation(); MediaLibrary.triggerFileInput();">
+          <label for="media-file-input" class="btn btn-primary" style="margin-top: 6px; font-size: 0.75rem; padding: 5px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
             📁 Escolher do Computador
-          </button>
+          </label>
           <div class="upload-progress" id="upload-progress">
             <div class="upload-progress-bar" id="upload-progress-bar"></div>
           </div>
@@ -366,6 +365,9 @@ const App = (() => {
 
     // Inicia o editor
     await EditorApp.init();
+
+    // Inicia a biblioteca de mídia
+    MediaLibrary.init(EditorApp.getInstance());
 
     // Escuta mudanças de formato
     window.addEventListener('pageFormatChanged',   e => _updateFormatChip(e.detail));

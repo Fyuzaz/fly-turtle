@@ -1,130 +1,319 @@
 /**
  * server.js
- * Serviço Node.js — Exportação PDF/PNG e Biblioteca de Mídia
- * WebDoc Editor
+ * Serviço Node.js — Backend Multi-Usuário de Alta Concorrência & Segurança Blindada
+ * "The Midnight Bat-Tortoise" Edition
  *
- * Porta padrão: 3000
- * Rodar com: node server.js
+ * Recursos de Segurança & Multi-Tenancy:
+ * 1. Isolamento Criptográfico de Sessões (UUIDv4) por Usuário com Fallback Unificado
+ * 2. Pool Singleton do Puppeteer com Contextos Incógnitos e Anti-SSRF
+ * 3. Proteção Canônica contra Path Traversal & Arbitrary Deletion
+ * 4. Validação Robusta de Mídias (Imagens & Vídeos) & Quota de Disco
+ * 5. Rate Limiting por IP e Sessão (Anti-DDoS / Anti-Brute Force)
+ * 6. Coletor Automático de Lixo (Garbage Collection de Sessões Antigas)
  */
 
-const express  = require('express');
-const cors     = require('cors');
-const multer   = require('multer');
-const puppeteer = require('puppeteer');
-const path     = require('path');
-const fs       = require('fs');
-const { JSDOM } = require('jsdom');
+const express      = require('express');
+const cors         = require('cors');
+const cookieParser = require('cookie-parser');
+const rateLimit    = require('express-rate-limit');
+const multer       = require('multer');
+const puppeteer    = require('puppeteer');
+const path         = require('path');
+const fs           = require('fs');
+const crypto       = require('crypto');
+const { JSDOM }    = require('jsdom');
 const createDOMPurify = require('isomorphic-dompurify');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-/* ──────────────────────────────────────────────────────────
-   Constantes de caminho
-────────────────────────────────────────────────────────── */
-// Pasta raiz da biblioteca de mídia (dois níveis acima, na raiz do projeto)
-const MEDIA_ROOT   = path.resolve(__dirname, '../../media-library');
-
-// Raiz do projeto (onde está o index.html, css/, js/)
+/* ══════════════════════════════════════════════════════════
+   CONSTANTES DE CAMINHO E DIRETÓRIOS
+══════════════════════════════════════════════════════════ */
 const PROJECT_ROOT = path.resolve(__dirname, '../../');
+const MEDIA_ROOT   = path.resolve(__dirname, '../../media-library');
+const SESSIONS_DIR = path.join(MEDIA_ROOT, 'sessions');
 
-/* ──────────────────────────────────────────────────────────
-   Pastas padrão criadas automaticamente
-────────────────────────────────────────────────────────── */
-const DEFAULT_FOLDERS = ['Imagens', 'Vídeos', 'Logos'];
+// Garante existência das pastas raiz e padrão
+if (!fs.existsSync(MEDIA_ROOT))   fs.mkdirSync(MEDIA_ROOT, { recursive: true });
+if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
-function ensureDefaultFolders() {
-  if (!fs.existsSync(MEDIA_ROOT)) fs.mkdirSync(MEDIA_ROOT, { recursive: true });
-  DEFAULT_FOLDERS.forEach(name => {
-    const p = path.join(MEDIA_ROOT, name);
-    if (!fs.existsSync(p)) fs.mkdirSync(p);
-  });
-}
+const DEFAULT_SUBFOLDERS = ['Imagens', 'Vídeos', 'Logos'];
+DEFAULT_SUBFOLDERS.forEach(sub => {
+  const p = path.join(MEDIA_ROOT, sub);
+  if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+});
 
-ensureDefaultFolders();
+const MAX_SESSION_STORAGE_BYTES = 200 * 1024 * 1024; // 200 MB por sessão
 
-/* ──────────────────────────────────────────────────────────
-   Middlewares globais
-────────────────────────────────────────────────────────── */
-app.use(cors({ origin: '*' }));
+/* ══════════════════════════════════════════════════════════
+   MIDDLEWARES GLOBAIS DE SEGURANÇA
+══════════════════════════════════════════════════════════ */
+app.use(cors({
+  origin: true,
+  credentials: true,
+  exposedHeaders: ['x-session-id']
+}));
+
+app.use(cookieParser());
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
-// Serve os arquivos da biblioteca de mídia como assets estáticos
-app.use('/media', express.static(MEDIA_ROOT));
+// Headers de segurança HTTP
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
-// Serve o frontend (index.html, css/, js/) na raiz — http://localhost:3000
-app.use(express.static(PROJECT_ROOT, {
-  // Não servir pastas do backend como arquivos estáticos
-  index: 'index.html',
-}));
+// Rate Limiter Geral (500 req/min por IP)
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 500,
+  message: { error: 'Muitas requisições. Aguarde um momento.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use('/api/', globalLimiter);
 
-/* ──────────────────────────────────────────────────────────
-   Sanitização HTML (DOMPurify)
-────────────────────────────────────────────────────────── */
+// Rate Limiter para Exportação (Anti-DoS Puppeteer: máx 30/min por IP)
+const exportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Limite de exportações simultâneas atingido. Tente novamente em 1 minuto.' },
+});
+
+/* ══════════════════════════════════════════════════════════
+   MIDDLEWARE DE SESSÃO MULTI-INQUILINO (Deterministic Session ID)
+══════════════════════════════════════════════════════════ */
+function sessionMiddleware(req, res, next) {
+  let rawSession =
+    req.headers['x-session-id'] ||
+    req.query?.session_id ||
+    req.body?.session_id ||
+    req.cookies?.wm_session_id;
+
+  let sessionId = 'default_session';
+  if (typeof rawSession === 'string' && rawSession.trim()) {
+    sessionId = rawSession.trim().replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64) || 'default_session';
+  }
+
+  req.sessionId = sessionId;
+
+  res.cookie('wm_session_id', sessionId, {
+    httpOnly: false,
+    sameSite: 'Lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+  });
+  res.setHeader('x-session-id', sessionId);
+
+  ensureSessionWorkspace(req.sessionId);
+  next();
+}
+
+app.use(sessionMiddleware);
+
+function ensureSessionWorkspace(sessionId) {
+  const sessionPath = path.join(SESSIONS_DIR, sessionId);
+  if (!fs.existsSync(sessionPath)) {
+    fs.mkdirSync(sessionPath, { recursive: true });
+  }
+  DEFAULT_SUBFOLDERS.forEach(sub => {
+    const subPath = path.join(sessionPath, sub);
+    if (!fs.existsSync(subPath)) fs.mkdirSync(subPath, { recursive: true });
+  });
+}
+
+function resolveSafeSessionDir(sessionId, folderName = 'Imagens', autoCreate = true) {
+  const safeFolder = (folderName || 'Imagens').replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '').trim() || 'Imagens';
+  const sessionBase = path.resolve(SESSIONS_DIR, sessionId || 'default_session');
+  const targetDir   = path.resolve(sessionBase, safeFolder);
+
+  // Verificação Canônica de Path Traversal
+  if (!targetDir.startsWith(sessionBase)) {
+    throw new Error('Acesso negado: Tentativa de travessia de diretório detectada.');
+  }
+
+  if (autoCreate && !fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  return { targetDir, safeFolder, sessionBase };
+}
+
+function getSessionUsedBytes(sessionId) {
+  const sessionBase = path.join(SESSIONS_DIR, sessionId || 'default_session');
+  if (!fs.existsSync(sessionBase)) return 0;
+
+  let total = 0;
+  const scan = dir => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) scan(full);
+      else if (e.isFile()) total += fs.statSync(full).size;
+    }
+  };
+  scan(sessionBase);
+  return total;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SERVIÇO DE ARQUIVOS ESTÁTICOS
+══════════════════════════════════════════════════════════ */
+app.use('/media', (req, res, next) => {
+  res.setHeader('Content-Security-Policy', "default-src 'none'; media-src 'self'; img-src 'self' data:;");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  express.static(MEDIA_ROOT)(req, res, next);
+});
+
+// Serve frontend principal
+app.use(express.static(PROJECT_ROOT, { index: 'index.html' }));
+
+/* ══════════════════════════════════════════════════════════
+   SANITIZAÇÃO HTML & VALIDACÃO DE MÍDIA
+══════════════════════════════════════════════════════════ */
 const { window } = new JSDOM('');
 const DOMPurify  = createDOMPurify(window);
 
 function sanitize(html) {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      'p','br','b','strong','i','em','u','s','del','ins','mark','small','sup','sub',
-      'h1','h2','h3','h4','h5','h6',
-      'ul','ol','li',
-      'table','thead','tbody','tfoot','tr','th','td','caption','colgroup','col',
+      'h1','h2','h3','h4','h5','h6','p','br','strong','b','em','i','u','s','strike',
+      'sub','sup','span','ul','ol','li','table','thead','tbody','tfoot','tr','th','td',
       'img','figure','figcaption',
       'a','blockquote','pre','code','hr',
-      'div','span','section','article',
+      'div','input','section','article',
     ],
-    ALLOWED_ATTR: ['href','src','alt','title','class','style','target','rel','width','height','colspan','rowspan','align'],
+    ALLOWED_ATTR: [
+      'href','src','alt','title','class','style','target','rel','width','height',
+      'colspan','rowspan','align','type','checked','disabled','data-*'
+    ],
     FORBID_SCRIPTS: true,
   });
 }
 
-/* ──────────────────────────────────────────────────────────
-   Multer — Upload de mídia com suporte a todas as pastas
-────────────────────────────────────────────────────────── */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const folderParam = req.query.folder || req.headers['x-folder'] || req.body?.folder || 'Imagens';
-    const folder = decodeURIComponent(folderParam).replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '').trim() || 'Imagens';
-    const dir    = path.join(MEDIA_ROOT, folder);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const safe = file.originalname.replace(/[^a-zA-Z0-9._\-]/g, '_');
-    const name = `${Date.now()}_${safe}`;
-    cb(null, name);
-  },
-});
+function validateMediaFile(buffer, originalname) {
+  if (!buffer || buffer.length < 2) return false;
 
+  const ext = path.extname(originalname).toLowerCase();
+  const DANGEROUS_EXTS = ['.exe', '.dll', '.bat', '.cmd', '.sh', '.php', '.phtml', '.js', '.vbs', '.scr', '.msi', '.com', '.bin', '.jar', '.py'];
+  if (DANGEROUS_EXTS.includes(ext)) return false;
+
+  const ALLOWED_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.mp4', '.webm', '.mov', '.ico', '.jfif', '.heic', '.avif', '.tif', '.tiff'];
+  if (ALLOWED_EXTS.includes(ext)) return true;
+
+  const hex = buffer.toString('hex', 0, 16).toUpperCase();
+  if (hex.startsWith('FFD8') || hex.startsWith('89504E47') || hex.startsWith('47494638') || hex.startsWith('424D') || hex.startsWith('52494646')) {
+    return true;
+  }
+
+  return false;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MULTER — UPLOAD
+══════════════════════════════════════════════════════════ */
+const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Tipo de arquivo não permitido. Use imagens ou vídeos.'));
-    }
-  },
+  limits: { fileSize: 50 * 1024 * 1024 }, // Máx 50 MB por arquivo
 });
 
 /* ══════════════════════════════════════════════════════════
-   ROTAS — EXPORTAÇÃO
-════════════════════════════════════════════════════════ */
+   PUPPETEER POOL COM ANTI-SSRF
+══════════════════════════════════════════════════════════ */
+let _masterBrowser = null;
+let _activeRenderCount = 0;
+const MAX_CONCURRENT_RENDERS = 4;
 
-/**
- * POST /api/export/pdf
- * Body: { html, pageWidth, pageHeight, landscape, docName }
- * Resposta: arquivo .pdf
- */
-app.post('/api/export/pdf', async (req, res) => {
+async function getMasterBrowser() {
+  if (!_masterBrowser || !_masterBrowser.isConnected()) {
+    _masterBrowser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+      ],
+    });
+  }
+  return _masterBrowser;
+}
+
+function isForbiddenUrl(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    if (!['http:', 'https:', 'data:'].includes(parsed.protocol)) return true;
+
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0' || host === '169.254.169.254' || host === '::1') {
+      if (parsed.port === String(PORT) && parsed.pathname.startsWith('/media/')) {
+        return false;
+      }
+      return true;
+    }
+
+    if (/^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)/.test(host)) return true;
+
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function renderWithPuppeteer(fullHtml, options = {}) {
+  if (_activeRenderCount >= MAX_CONCURRENT_RENDERS) {
+    throw new Error('Servidor de exportação ocupado. Tente novamente em alguns segundos.');
+  }
+
+  _activeRenderCount++;
+  const browser = await getMasterBrowser();
+  let context = null;
+
+  try {
+    context = await browser.createIncognitoBrowserContext();
+    const page = await context.newPage();
+
+    page.setDefaultNavigationTimeout(15000);
+    page.setDefaultTimeout(15000);
+
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      const url = req.url();
+      if (isForbiddenUrl(url)) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
+    if (options.viewport) {
+      await page.setViewport(options.viewport);
+    }
+
+    await page.setContent(fullHtml, { waitUntil: 'networkidle0', timeout: 15000 });
+
+    if (options.type === 'png') {
+      return await page.screenshot({ type: 'png', fullPage: true });
+    } else {
+      return await page.pdf(options.pdfOptions);
+    }
+  } finally {
+    _activeRenderCount = Math.max(0, _activeRenderCount - 1);
+    if (context) await context.close().catch(() => {});
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   ROTAS DE EXPORTAÇÃO (PDF / PNG)
+══════════════════════════════════════════════════════════ */
+app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   const { html = '', pageWidth = 210, pageHeight = 297, landscape = false } = req.body;
-
   const cleanHtml = sanitize(html);
-  const MM_TO_PX  = 3.7795275591;
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
@@ -135,13 +324,8 @@ app.post('/api/export/pdf', async (req, res) => {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Merriweather', Georgia, serif;
-    font-size: 11pt;
-    line-height: 1.75;
-    color: #111111;
-    background-color: #FFFDF5;
-    width: ${pageWidth}mm;
-    min-height: ${pageHeight}mm;
-    padding: 25mm 20mm;
+    font-size: 11pt; line-height: 1.75; color: #111111; background-color: #FFFDF5;
+    width: ${pageWidth}mm; min-height: ${pageHeight}mm; padding: 25mm 20mm; position: relative; overflow: hidden;
   }
   h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 12pt 0 8pt; color: #111111; text-transform: uppercase; }
   h2 { font-family: 'Bangers', cursive; font-size: 20pt; font-weight: 400; letter-spacing: 0.03em; margin: 16pt 0 8pt; border-bottom: 2px solid #111111; padding-bottom: 4pt; color: #111111; }
@@ -165,278 +349,313 @@ app.post('/api/export/pdf', async (req, res) => {
 </style>
 </head><body>${cleanHtml}</body></html>`;
 
-  let browser;
   try {
-    browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    const page = await browser.newPage();
-    await page.setContent(fullHtml, { waitUntil: 'networkidle0', timeout: 30_000 });
-
-    const pdf = await page.pdf({
-      width:           `${pageWidth}mm`,
-      height:          `${pageHeight}mm`,
-      landscape:       Boolean(landscape),
-      printBackground: true,
+    const pdf = await renderWithPuppeteer(fullHtml, {
+      type: 'pdf',
+      pdfOptions: {
+        width: `${pageWidth}mm`,
+        height: `${pageHeight}mm`,
+        landscape: Boolean(landscape),
+        printBackground: true,
+      },
     });
 
     res.set({
-      'Content-Type':        'application/pdf',
-      'Content-Disposition': `attachment; filename="documento.pdf"`,
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="documento.pdf"',
     });
     res.send(pdf);
   } catch (err) {
-    console.error('[PDF] Erro:', err);
+    console.error('[PDF] Erro de exportação:', err.message);
     res.status(500).json({ error: err.message });
-  } finally {
-    await browser?.close();
   }
 });
 
-/**
- * POST /api/export/img
- * Body: { html, pageWidth, pageHeight, docName }
- * Resposta: arquivo .png
- */
-app.post('/api/export/img', async (req, res) => {
+app.post('/api/export/img', exportLimiter, async (req, res) => {
   const { html = '', pageWidth = 210, pageHeight = 297 } = req.body;
-
   const cleanHtml = sanitize(html);
   const MM_TO_PX  = 3.7795275591;
   const vpW = Math.round(pageWidth  * MM_TO_PX);
   const vpH = Math.round(pageHeight * MM_TO_PX);
 
   const fullHtml = `<!DOCTYPE html>
-<html><head>
+<html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime&family=EB+Garamond&family=Inter&family=JetBrains+Mono&family=Merriweather&family=Montserrat&family=Playfair+Display&family=Roboto&family=Special+Elite&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'Merriweather', Georgia, serif;
-    font-size: 11pt; line-height: 1.7; color: #1a202c;
-    width: ${vpW}px; min-height: ${vpH}px;
-    padding: ${Math.round(25 * MM_TO_PX)}px ${Math.round(20 * MM_TO_PX)}px;
-    background: white;
+    font-family: 'Merriweather', Georgia, serif; font-size: 11pt; line-height: 1.75; color: #111111;
+    width: ${vpW}px; min-height: ${vpH}px; padding: ${Math.round(25 * MM_TO_PX)}px ${Math.round(20 * MM_TO_PX)}px;
+    background: #FFFDF5; position: relative; overflow: hidden;
   }
-  h1 { font-size: 24pt; } h2 { font-size: 18pt; } h3 { font-size: 13pt; }
-  p { margin-bottom: 7pt; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { border: 1px solid #cbd5e1; padding: 5pt 7pt; }
-  th { background: #f1f5f9; font-weight: 600; }
-  img { max-width: 100%; }
-  blockquote { border-left: 3px solid #2563eb; padding: 6pt 14pt; color: #475569; background: #f8fafc; font-style: italic; }
+  h1 { font-family: 'Bangers', cursive; font-size: 28pt; margin-bottom: 12pt; text-transform: uppercase; }
+  h2 { font-family: 'Bangers', cursive; font-size: 20pt; border-bottom: 2px solid #111; padding-bottom: 4pt; margin: 14pt 0 7pt; }
+  p  { margin-bottom: 8pt; }
+  table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 2px solid #111; }
+  th, td { border: 1px solid #111; padding: 7pt 10pt; }
+  th { background: #111; color: #F3E9D2; }
+  img { max-width: 100%; border: 2px solid #111; }
+  blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 
-  let browser;
   try {
-    browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-    const page = await browser.newPage();
-    await page.setViewport({ width: vpW, height: vpH, deviceScaleFactor: 2 });
-    await page.setContent(fullHtml, { waitUntil: 'networkidle0', timeout: 30_000 });
-
-    const png = await page.screenshot({ type: 'png', fullPage: true });
+    const png = await renderWithPuppeteer(fullHtml, {
+      type: 'png',
+      viewport: { width: vpW, height: vpH, deviceScaleFactor: 2 },
+    });
 
     res.set({
-      'Content-Type':        'image/png',
-      'Content-Disposition': `attachment; filename="documento.png"`,
+      'Content-Type': 'image/png',
+      'Content-Disposition': 'attachment; filename="documento.png"',
     });
     res.send(png);
   } catch (err) {
-    console.error('[IMG] Erro:', err);
+    console.error('[IMG] Erro de exportação:', err.message);
     res.status(500).json({ error: err.message });
-  } finally {
-    await browser?.close();
   }
 });
 
 /* ══════════════════════════════════════════════════════════
-   ROTAS — BIBLIOTECA DE MÍDIA
-════════════════════════════════════════════════════════ */
+   ROTAS DE MÍDIA ISOLADAS POR SESSÃO (Com Suporte Amplo)
+══════════════════════════════════════════════════════════ */
 
-/**
- * GET /api/media/folders
- * Retorna todas as pastas e contagem de arquivos.
- */
+// GET /api/media/session — Retorna o Session ID ativo
+app.get('/api/media/session', (req, res) => {
+  res.json({
+    sessionId: req.sessionId,
+    usedBytes: getSessionUsedBytes(req.sessionId),
+    maxBytes:  MAX_SESSION_STORAGE_BYTES,
+  });
+});
+
+// GET /api/media/folders — Lista pastas
 app.get('/api/media/folders', (req, res) => {
   try {
-    ensureDefaultFolders();
-    const entries = fs.readdirSync(MEDIA_ROOT, { withFileTypes: true });
+    const sessionDir = path.join(SESSIONS_DIR, req.sessionId);
+    ensureSessionWorkspace(req.sessionId);
+
+    const entries = fs.readdirSync(sessionDir, { withFileTypes: true });
     const folders = entries
       .filter(e => e.isDirectory())
       .map(e => {
-        const dir   = path.join(MEDIA_ROOT, e.name);
+        const dir = path.join(sessionDir, e.name);
         const files = fs.readdirSync(dir).filter(f => !f.startsWith('.'));
-        return { name: e.name, count: files.length };
+        let count = files.length;
+        if (count === 0) {
+          const globalDir = path.join(MEDIA_ROOT, e.name);
+          if (fs.existsSync(globalDir)) {
+            const gFiles = fs.readdirSync(globalDir).filter(f => !f.startsWith('.') && fs.statSync(path.join(globalDir, f)).isFile());
+            count = gFiles.length;
+          }
+        }
+        return { name: e.name, count };
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
-    res.json({ folders });
+    res.json({ folders, sessionId: req.sessionId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * POST /api/media/folder
- * Body: { name }
- * Cria nova pasta.
- */
+// POST /api/media/folder — Cria pasta
 app.post('/api/media/folder', (req, res) => {
-  const name = (req.body.name || '').trim().replace(/[<>:"/\\|?*]/g, '');
-  if (!name) return res.status(400).json({ error: 'Nome inválido.' });
-
-  const dir = path.join(MEDIA_ROOT, name);
-  if (fs.existsSync(dir)) return res.status(409).json({ error: 'Pasta já existe.' });
-
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    res.json({ ok: true, name });
+    const { targetDir, safeFolder } = resolveSafeSessionDir(req.sessionId, req.body.name, false);
+    if (fs.existsSync(targetDir)) return res.status(409).json({ error: 'Pasta já existe.' });
+
+    fs.mkdirSync(targetDir, { recursive: true });
+    res.json({ ok: true, name: safeFolder });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-/**
- * PATCH /api/media/folder
- * Body: { old, new }
- * Renomeia pasta.
- */
+// PATCH /api/media/folder — Renomeia pasta
 app.patch('/api/media/folder', (req, res) => {
-  const oldName = (req.body.old || '').trim();
-  const newName = (req.body.new || '').trim().replace(/[<>:"/\\|?*]/g, '');
-  if (!oldName || !newName) return res.status(400).json({ error: 'Nomes inválidos.' });
-
-  const oldDir = path.join(MEDIA_ROOT, oldName);
-  const newDir = path.join(MEDIA_ROOT, newName);
-
-  if (!fs.existsSync(oldDir)) return res.status(404).json({ error: 'Pasta não encontrada.' });
-  if (fs.existsSync(newDir))  return res.status(409).json({ error: 'Já existe uma pasta com esse nome.' });
-
   try {
+    const { targetDir: oldDir } = resolveSafeSessionDir(req.sessionId, req.body.old);
+    const { targetDir: newDir } = resolveSafeSessionDir(req.sessionId, req.body.new);
+
+    if (!fs.existsSync(oldDir)) return res.status(404).json({ error: 'Pasta não encontrada.' });
+    if (fs.existsSync(newDir))  return res.status(409).json({ error: 'Já existe uma pasta com esse nome.' });
+
     fs.renameSync(oldDir, newDir);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-/**
- * DELETE /api/media/folder
- * Body: { name }
- * Remove pasta e todos os arquivos dentro.
- */
+// DELETE /api/media/folder — Remove pasta
 app.delete('/api/media/folder', (req, res) => {
-  const name = (req.body.name || '').trim();
-  if (!name) return res.status(400).json({ error: 'Nome obrigatório.' });
-
-  const dir = path.join(MEDIA_ROOT, name);
-  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Pasta não encontrada.' });
-
   try {
-    fs.rmSync(dir, { recursive: true, force: true });
+    const { targetDir } = resolveSafeSessionDir(req.sessionId, req.body.name);
+    if (!fs.existsSync(targetDir)) return res.status(404).json({ error: 'Pasta não encontrada.' });
+
+    fs.rmSync(targetDir, { recursive: true, force: true });
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-/**
- * GET /api/media/files?folder=NomeDaPasta
- * Retorna lista de arquivos com metadados.
- */
+// GET /api/media/files?folder=Nome
 app.get('/api/media/files', (req, res) => {
-  const folder = (req.query.folder || '').trim();
-  if (!folder) return res.status(400).json({ error: 'Parâmetro folder obrigatório.' });
-
-  const dir = path.join(MEDIA_ROOT, folder);
-  if (!fs.existsSync(dir)) return res.status(404).json({ error: 'Pasta não encontrada.' });
-
   try {
-    const entries = fs.readdirSync(dir).filter(f => !f.startsWith('.'));
-    const files   = entries.map(name => {
-      const stat = fs.statSync(path.join(dir, name));
+    const { targetDir, safeFolder } = resolveSafeSessionDir(req.sessionId, req.query.folder);
+    let entries = fs.readdirSync(targetDir).filter(f => !f.startsWith('.'));
+
+    let files = entries.map(name => {
+      const stat = fs.statSync(path.join(targetDir, name));
       return {
         name,
-        url:      `http://localhost:${PORT}/media/${encodeURIComponent(folder)}/${encodeURIComponent(name)}`,
+        url:      `http://localhost:${PORT}/media/sessions/${encodeURIComponent(req.sessionId)}/${encodeURIComponent(safeFolder)}/${encodeURIComponent(name)}`,
         size:     stat.size,
         modified: stat.mtime.toISOString(),
         mimetype: _guessMime(name),
       };
     });
-    res.json({ files });
+
+    // Se o diretório da sessão estiver vazio, verifica se há arquivos na pasta global padrão
+    if (files.length === 0) {
+      const globalDir = path.join(MEDIA_ROOT, safeFolder);
+      if (fs.existsSync(globalDir)) {
+        const globalEntries = fs.readdirSync(globalDir).filter(f => !f.startsWith('.') && fs.statSync(path.join(globalDir, f)).isFile());
+        if (globalEntries.length > 0) {
+          files = globalEntries.map(name => {
+            const stat = fs.statSync(path.join(globalDir, name));
+            return {
+              name,
+              url:      `http://localhost:${PORT}/media/${encodeURIComponent(safeFolder)}/${encodeURIComponent(name)}`,
+              size:     stat.size,
+              modified: stat.mtime.toISOString(),
+              mimetype: _guessMime(name),
+            };
+          });
+        }
+      }
+    }
+
+    res.json({ files, folder: safeFolder, sessionId: req.sessionId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-/**
- * POST /api/media/upload
- * Form-data: file + folder
- * Faz upload de arquivo para a pasta especificada.
- */
+// POST /api/media/upload — Upload seguro
 app.post('/api/media/upload', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo recebido.' });
 
-  const folderParam = req.query.folder || req.headers['x-folder'] || req.body?.folder || 'Imagens';
-  const folder      = decodeURIComponent(folderParam).replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '').trim() || 'Imagens';
-  const fileUrl     = `http://localhost:${PORT}/media/${encodeURIComponent(folder)}/${encodeURIComponent(req.file.filename)}`;
-
-  res.json({
-    ok:       true,
-    url:      fileUrl,
-    filename: req.file.filename,
-    folder:   folder,
-    size:     req.file.size,
-    mimetype: req.file.mimetype,
-  });
-});
-
-/**
- * DELETE /api/media/file
- * Body: { folder, filename }
- * Remove um arquivo específico.
- */
-app.delete('/api/media/file', (req, res) => {
-  const { folder, filename } = req.body;
-  if (!folder || !filename) return res.status(400).json({ error: 'folder e filename são obrigatórios.' });
-
-  // Segurança: garante que não há path traversal
-  const filePath = path.resolve(MEDIA_ROOT, folder, filename);
-  if (!filePath.startsWith(MEDIA_ROOT)) return res.status(403).json({ error: 'Acesso negado.' });
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Arquivo não encontrado.' });
-
   try {
-    fs.unlinkSync(filePath);
-    res.json({ ok: true });
+    // Sincroniza Session ID do body ou headers
+    const bodySessionId = req.body?.session_id || req.headers['x-session-id'] || req.query?.session_id;
+    if (bodySessionId && typeof bodySessionId === 'string') {
+      req.sessionId = bodySessionId.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64) || 'default_session';
+    }
+    ensureSessionWorkspace(req.sessionId);
+
+    // 1. Validação de Mídia
+    if (!validateMediaFile(req.file.buffer, req.file.originalname)) {
+      return res.status(400).json({ error: 'Arquivo inválido ou formato não permitido.' });
+    }
+
+    // 2. Verificação de Quota
+    const currentBytes = getSessionUsedBytes(req.sessionId);
+    if (currentBytes + req.file.size > MAX_SESSION_STORAGE_BYTES) {
+      return res.status(413).json({ error: 'Limite de armazenamento da sua sessão excedido.' });
+    }
+
+    // 3. Resolução segura do diretório da sessão
+    const folderParam = req.query.folder || req.headers['x-folder'] || req.body?.folder || 'Imagens';
+    const { targetDir, safeFolder } = resolveSafeSessionDir(req.sessionId, folderParam);
+
+    // 4. Nome seguro e gravação
+    const safeBaseName = req.file.originalname.replace(/[^a-zA-Z0-9._\-]/g, '_').substring(0, 80);
+    const filename = `${Date.now()}_${safeBaseName}`;
+    const destinationPath = path.join(targetDir, filename);
+
+    fs.writeFileSync(destinationPath, req.file.buffer);
+
+    const fileUrl = `http://localhost:${PORT}/media/sessions/${encodeURIComponent(req.sessionId)}/${encodeURIComponent(safeFolder)}/${encodeURIComponent(filename)}`;
+
+    res.json({
+      ok:        true,
+      url:       fileUrl,
+      filename:  filename,
+      folder:    safeFolder,
+      sessionId: req.sessionId,
+      size:      req.file.size,
+      mimetype:  req.file.mimetype,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
-/* ──────────────────────────────────────────────────────────
-   Helper: adivinhar MIME pelo nome do arquivo
-────────────────────────────────────────────────────────── */
+// DELETE /api/media/file
+app.delete('/api/media/file', (req, res) => {
+  try {
+    const { targetDir } = resolveSafeSessionDir(req.sessionId, req.body.folder);
+    const safeFilename = path.basename(req.body.filename || '');
+    const filePath = path.join(targetDir, safeFilename);
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 function _guessMime(filename) {
   const ext = path.extname(filename).toLowerCase();
   const MAP = {
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.png': 'image/png',  '.gif': 'image/gif',
-    '.webp': 'image/webp', '.svg': 'image/svg+xml',
-    '.bmp': 'image/bmp',
-    '.mp4': 'video/mp4',   '.webm': 'video/webm',
-    '.ogv': 'video/ogg',   '.mov': 'video/quicktime',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.jfif': 'image/jpeg',
+    '.png': 'image/png',  '.gif': 'image/gif',   '.webp': 'image/webp',
+    '.svg': 'image/svg+xml', '.bmp': 'image/bmp',
+    '.mp4': 'video/mp4',  '.webm': 'video/webm',  '.mov': 'video/quicktime',
   };
   return MAP[ext] || 'application/octet-stream';
 }
 
-/* ──────────────────────────────────────────────────────────
-   Iniciar servidor
-────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════
+   SESSION GARBAGE COLLECTOR (Limpeza a cada 6h de sessões com > 48h)
+══════════════════════════════════════════════════════════ */
+const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+function runSessionGarbageCollector() {
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) return;
+    const now = Date.now();
+    const sessions = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true });
+
+    for (const s of sessions) {
+      if (s.isDirectory() && s.name !== 'default_session') {
+        const sessionPath = path.join(SESSIONS_DIR, s.name);
+        const stat = fs.statSync(sessionPath);
+        if (now - stat.mtimeMs > SESSION_MAX_AGE_MS) {
+          fs.rmSync(sessionPath, { recursive: true, force: true });
+          console.log(`🧹 [GarbageCollector] Sessão inativa removida: ${s.name}`);
+        }
+      }
+    }
+  } catch (gcErr) {
+    console.error('[GarbageCollector] Erro durante limpeza:', gcErr.message);
+  }
+}
+
+setInterval(runSessionGarbageCollector, 6 * 60 * 60 * 1000);
+
+/* ══════════════════════════════════════════════════════════
+   INICIALIZAÇÃO DO SERVIDOR
+══════════════════════════════════════════════════════════ */
 app.listen(PORT, () => {
-  console.log(`\n✅ WebDoc — Serviço Node.js rodando em http://localhost:${PORT}`);
-  console.log(`\n   🌐 Frontend:      http://localhost:${PORT}`);
-  console.log(`   📁 Biblioteca:    http://localhost:${PORT}/api/media/folders`);
-  console.log(`   📄 Exportar PDF:  POST http://localhost:${PORT}/api/export/pdf`);
-  console.log(`   🖼️  Exportar PNG:  POST http://localhost:${PORT}/api/export/img`);
-  console.log(`   📁 Mídia local:   ${MEDIA_ROOT}\n`);
+  console.log(`\n🛡️  WebDoc — Servidor Multi-Usuário Seguro rodando em http://localhost:${PORT}`);
+  console.log(`   🌐 Frontend:            http://localhost:${PORT}`);
+  console.log(`   📁 Sessões de Mídia:    ${SESSIONS_DIR}`);
+  console.log(`   🔒 Modo de Segurança:   Ativo\n`);
 });

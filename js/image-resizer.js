@@ -128,6 +128,16 @@ const ImageResizer = (() => {
     window.addEventListener('mousemove', _onMouseMove);
     window.addEventListener('mouseup', _onMouseUp);
 
+    // Intercepta arrasto nativo do navegador para impedir que estilos sejam apagados
+    document.addEventListener('dragstart', e => {
+      const img = e.target.closest('#workspace img, #page-sheet img, .ck-content img');
+      if (img && !img.closest('#media-drawer')) {
+        e.preventDefault();
+        selectImage(img);
+        _onMoveHandleMouseDown(e);
+      }
+    });
+
     // Teclado (Delete / Backspace / Esc) - Captura em fase primária para impedir exclusão de caracteres
     window.addEventListener('keydown', e => {
       if (_activeImg) {
@@ -150,8 +160,23 @@ const ImageResizer = (() => {
     if (!img) return;
     _activeImg = img;
 
-    _activeImg.style.maxWidth = '100%';
-    _activeImg.style.boxSizing = 'border-box';
+    // Trava as dimensões atuais em pixels fixos para impedir redimensionamento involuntário
+    const rect = img.getBoundingClientRect();
+    const fixedW = Math.round(rect.width);
+    if (fixedW > 0) {
+      _activeImg.style.width     = `${fixedW}px`;
+      _activeImg.style.height    = 'auto';
+      _activeImg.style.maxWidth  = '100%';
+      _activeImg.style.boxSizing = 'border-box';
+      _activeImg.setAttribute('draggable', 'false');
+
+      const targetEl = _activeImg.closest('figure.image') || _activeImg;
+      if (targetEl !== _activeImg) {
+        targetEl.style.width  = `${fixedW}px`;
+        targetEl.style.height = 'auto';
+      }
+    }
+
     _aspectRatio = _imgNaturalRatio(img) || 1;
 
     _updateModeButtonText();
@@ -271,6 +296,17 @@ const ImageResizer = (() => {
     const sheet     = document.getElementById('page-sheet');
     const sheetRect = sheet.getBoundingClientRect();
     const elRect    = targetEl.getBoundingClientRect();
+
+    // Garante que o tamanho em pixels esteja 100% blindado antes do início do movimento
+    const currentW = Math.round(elRect.width || _activeImg.getBoundingClientRect().width);
+    if (currentW > 0) {
+      _activeImg.style.width  = `${currentW}px`;
+      _activeImg.style.height = 'auto';
+      if (targetEl !== _activeImg) {
+        targetEl.style.width  = `${currentW}px`;
+        targetEl.style.height = 'auto';
+      }
+    }
 
     _startLeft = elRect.left - sheetRect.left;
     _startTop  = elRect.top - sheetRect.top;
@@ -426,6 +462,18 @@ const ImageResizer = (() => {
         } else {
           _dropTarget.parentNode.insertBefore(targetEl, _dropTarget.nextSibling);
         }
+
+        // Mantém as dimensões fixadas e sincroniza autossalvamento
+        const currentW = Math.round(targetEl.getBoundingClientRect().width || _activeImg.getBoundingClientRect().width);
+        if (currentW > 0) {
+          _activeImg.style.width  = `${currentW}px`;
+          _activeImg.style.height = 'auto';
+          if (targetEl !== _activeImg) {
+            targetEl.style.width  = `${currentW}px`;
+            targetEl.style.height = 'auto';
+          }
+        }
+        document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
         window.showToast?.('Imagem reposicionada no texto!', 'success');
       }
 
@@ -501,6 +549,14 @@ const ImageResizer = (() => {
     const sheet    = document.getElementById('page-sheet');
     const isFree   = _isFreeFloating(_activeImg);
 
+    const currentW = Math.round(targetEl.getBoundingClientRect().width || _activeImg.getBoundingClientRect().width);
+    if (currentW > 0) {
+      _activeImg.style.width  = `${currentW}px`;
+      _activeImg.style.height = 'auto';
+      targetEl.style.width    = `${currentW}px`;
+      targetEl.style.height   = 'auto';
+    }
+
     if (isFree) {
       // Volta para o fluxo do texto
       targetEl.style.position = '';
@@ -535,6 +591,7 @@ const ImageResizer = (() => {
       window.showToast?.('Modo Livre ativado! Ajuste posição e camadas livremente.', 'success');
     }
 
+    document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
     _updateModeButtonText();
     setTimeout(_updateOverlayPosition, 50);
   }

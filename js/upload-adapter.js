@@ -20,9 +20,12 @@ class UploadAdapter {
       const folderEl = document.querySelector('.folder-item.active');
       const folder   = folderEl?.dataset?.name || 'Imagens';
 
+      const sid = window.MediaLibrary?.getSessionId() || localStorage.getItem('wm_session_id') || '';
+
       this.xhr = new XMLHttpRequest();
       this.xhr.open('POST', `${this.API_URL}?folder=${encodeURIComponent(folder)}`);
       this.xhr.setRequestHeader('x-folder', encodeURIComponent(folder));
+      if (sid) this.xhr.setRequestHeader('x-session-id', sid);
 
       // Progresso de upload
       this.xhr.upload.addEventListener('progress', evt => {

@@ -113,9 +113,12 @@
 /* ─── Drawer Body ────────────────────────────── */
 .drawer-body {
   flex: 1;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-black) var(--aged-paper);
 }
 
 /* ─── Folder Panel ───────────────────────────── */
@@ -383,12 +386,12 @@
 /* ─── File Thumbnail ─────────────────────────── */
 .file-thumb {
   position: relative;
-  border-radius: 1px;
+  border-radius: 3px;
   overflow: hidden;
   aspect-ratio: 1;
   background: var(--paper-dark);
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
   border: 2px solid var(--ink-black);
   box-shadow: 2px 2px 0px var(--ink-black);
 }
@@ -399,103 +402,141 @@
   border-color: var(--burnt-orange);
 }
 
-.file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-.file-thumb.video .thumb-icon-wrap {
+.file-thumb img {
   width: 100%;
   height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: var(--ink-black);
+  object-fit: cover;
+  display: block;
 }
 
-.thumb-play-icon { font-size: 22px; color: var(--burnt-orange); }
-
-.video-filename {
-  font-family: var(--font-mono);
-  font-size: 8px;
-  color: rgba(243,233,210,0.6);
-  text-align: center;
-  padding: 0 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.file-thumb video {
   width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
-/* Hover overlay */
+.video-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: var(--ink-black);
+  color: var(--burnt-orange);
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--burnt-orange);
+  z-index: 2;
+  box-shadow: 1px 1px 0px var(--ink-black);
+}
+
+/* Hover overlay com Blur e botões compactos estilizados */
 .file-thumb-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(17,17,17,0.88);
+  background: rgba(17, 17, 17, 0.84);
+  backdrop-filter: blur(2px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
+  gap: 5px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transform: scale(0.96);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 10;
+  padding: 4px;
 }
 
-.file-thumb:hover .file-thumb-overlay { opacity: 1; }
+.file-thumb:hover .file-thumb-overlay {
+  opacity: 1;
+  transform: scale(1);
+}
 
-.thumb-insert-btn {
+.thumb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1.5px solid var(--ink-black);
+  border-radius: 2px;
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  padding: 3px 8px;
+  cursor: pointer;
+  text-transform: uppercase;
+  font-weight: 700;
+  box-shadow: 1.5px 1.5px 0px var(--ink-black);
+  transition: all 0.1s ease;
+  width: 80%;
+  max-width: 90px;
+  outline: none;
+  line-height: 1.2;
+}
+
+.thumb-btn .btn-icon {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.thumb-btn .btn-txt {
+  line-height: 1;
+}
+
+.thumb-btn.insert {
   background: var(--burnt-orange);
   color: var(--aged-paper);
-  border: 2px solid var(--aged-paper);
-  border-radius: 1px;
-  padding: 4px 9px;
-  font-family: var(--font-display);
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: var(--transition-fast);
-  box-shadow: 2px 2px 0px rgba(0,0,0,0.4);
 }
 
-.thumb-insert-btn:hover {
+.thumb-btn.insert:hover {
   background: var(--orange-dark);
   transform: translate(-1px, -1px);
-  box-shadow: 3px 3px 0px rgba(0,0,0,0.4);
+  box-shadow: 2px 2px 0px var(--ink-black);
 }
 
-.thumb-delete-btn {
-  background: transparent;
-  color: #fc8181;
-  border: 1px solid rgba(252,129,129,0.5);
-  border-radius: 1px;
-  padding: 3px 7px;
-  font-family: var(--font-display);
-  font-size: 0.65rem;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: var(--transition-fast);
+.thumb-btn.danger {
+  background: #c0392b;
+  color: #ffffff;
+  font-size: 9px;
+  padding: 2.5px 6px;
 }
 
-.thumb-delete-btn:hover { background: #c0392b; border-color: #c0392b; color: #fff; }
+.thumb-btn.danger:hover {
+  background: #962d22;
+  transform: translate(-1px, -1px);
+  box-shadow: 2px 2px 0px var(--ink-black);
+}
 
-.file-name-label {
+.thumb-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+
+.file-thumb-footer {
   position: absolute;
-  bottom: 0; left: 0; right: 0;
-  padding: 3px 4px;
-  background: var(--ink-black);
-  font-family: var(--font-mono);
-  font-size: 8px;
-  color: rgba(243,233,210,0.8);
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 3px 6px;
+  background: rgba(17, 17, 17, 0.88);
+  border-top: 1px solid rgba(243, 233, 210, 0.2);
+  z-index: 2;
+}
+
+.file-thumb-name {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--aged-paper);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: center;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  display: block;
 }
-
-.file-thumb:hover .file-name-label { opacity: 1; }
 
 /* ─── Empty State ────────────────────────────── */
 .files-empty {

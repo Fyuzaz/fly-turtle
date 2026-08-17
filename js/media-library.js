@@ -1,18 +1,70 @@
 /**
  * media-library.js
- * Gaveta de Mídia — gerenciamento de pastas, upload, preview e inserção no editor
- * "The Midnight Bat-Tortoise" Edition
+ * Gaveta de Mídia Multi-Usuário — gerenciamento de pastas, upload, preview e inserção no editor
+ * "The Midnight Bat-Tortoise" Edition (100% compatível com Navegação Normal e Abas Anônimas)
  */
 
 const MediaLibrary = (() => {
 
-  // Resolve dinamicamente a URL base da API
   const API = (window.location.origin && window.location.origin.startsWith('http'))
     ? window.location.origin
     : 'http://localhost:3000';
 
-  const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|svg|bmp)$/i;
-  const VIDEO_EXTS = /\.(mp4|webm|ogv|mov)$/i;
+  const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|svg|bmp|ico|jfif|tiff?|avif|heic)$/i;
+  const VIDEO_EXTS = /\.(mp4|webm|ogv|mov|mkv)$/i;
+
+  /* ──────────────────────────────────────────────────────────
+     Gerenciamento de Sessão Determinística
+  ────────────────────────────────────────────────────────── */
+  let _sessionId = _initSession();
+
+  function _generateUUID() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+  }
+
+  function _initSession() {
+    let sid = '';
+    try {
+      sid = localStorage.getItem('wm_session_id') || '';
+    } catch {}
+
+    if (!sid) {
+      const match = document.cookie.match(/wm_session_id=([a-zA-Z0-9_-]+)/i);
+      if (match) sid = match[1];
+    }
+
+    if (!sid) {
+      sid = _generateUUID();
+      try {
+        localStorage.setItem('wm_session_id', sid);
+      } catch {}
+    }
+    return sid;
+  }
+
+  function getSessionId() {
+    if (!_sessionId) _sessionId = _initSession();
+    return _sessionId;
+  }
+
+  function setSessionId(id) {
+    if (id && typeof id === 'string') {
+      _sessionId = id;
+      try {
+        localStorage.setItem('wm_session_id', id);
+      } catch {}
+    }
+  }
+
+  function getHeaders(custom = {}) {
+    const headers = { ...custom };
+    const sid = getSessionId();
+    if (sid) headers['x-session-id'] = sid;
+    return headers;
+  }
 
   /* ──────────────────────────────────────────────────────────
      Estado interno
@@ -64,17 +116,23 @@ const MediaLibrary = (() => {
   }
 
   /* ══════════════════════════════════════════════════════════
-     PASTAS
+     PASTAS (Isoladas por Sessão)
   ══════════════════════════════════════════════════════════ */
   async function loadFolders() {
     try {
-      const res = await fetch(`${API}/api/media/folders`);
+      const sid = getSessionId();
+      const res = await fetch(`${API}/api/media/folders?session_id=${encodeURIComponent(sid)}`, {
+        headers: getHeaders(),
+        credentials: 'include',
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+
+      if (data.sessionId) setSessionId(data.sessionId);
+
       const folders = data.folders || [];
       _renderFolders(folders);
 
-      // Garante uma pasta selecionada
       if (folders.length > 0) {
         const found = folders.find(f => f.name === _folder);
         selectFolder(found ? found.name : folders[0].name);
@@ -123,9 +181,11 @@ const MediaLibrary = (() => {
     const n = (name || '').trim();
     if (!n) return;
     try {
-      const res = await fetch(`${API}/api/media/folder`, {
+      const sid = getSessionId();
+      const res = await fetch(`${API}/api/media/folder?session_id=${encodeURIComponent(sid)}`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body:    JSON.stringify({ name: n }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -141,9 +201,11 @@ const MediaLibrary = (() => {
     const newName = prompt(`Novo nome para a pasta "${oldName}":`, oldName);
     if (!newName || newName.trim() === oldName) return;
     try {
-      const res = await fetch(`${API}/api/media/folder`, {
+      const sid = getSessionId();
+      const res = await fetch(`${API}/api/media/folder?session_id=${encodeURIComponent(sid)}`, {
         method:  'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body:    JSON.stringify({ old: oldName, new: newName.trim() }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -158,9 +220,11 @@ const MediaLibrary = (() => {
   async function promptDelete(name) {
     if (!confirm(`Excluir a pasta "${name}" e todos os arquivos dentro dela?`)) return;
     try {
-      const res = await fetch(`${API}/api/media/folder`, {
+      const sid = getSessionId();
+      const res = await fetch(`${API}/api/media/folder?session_id=${encodeURIComponent(sid)}`, {
         method:  'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body:    JSON.stringify({ name }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -183,9 +247,10 @@ const MediaLibrary = (() => {
     const li = document.createElement('li');
     li.className = 'folder-input-row';
     li.innerHTML = `
-      <input type="text" placeholder="Nome da pasta..." maxlength="60" />
-      <button class="folder-confirm-btn" title="Confirmar">✓</button>
-      <button class="folder-cancel-btn"  title="Cancelar">✕</button>`;
+      <span style="font-size:14px;">📁</span>
+      <input type="text" placeholder="Nome da pasta..." maxlength="30" />
+      <button class="folder-confirm-btn" title="Criar">✓</button>
+      <button class="folder-cancel-btn" title="Cancelar">✕</button>`;
 
     list.appendChild(li);
     const inp = li.querySelector('input');
@@ -214,9 +279,13 @@ const MediaLibrary = (() => {
     grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">⏳</span>Carregando...</div>';
 
     const targetFolder = folder || _folder || 'Imagens';
+    const sid = getSessionId();
 
     try {
-      const res = await fetch(`${API}/api/media/files?folder=${encodeURIComponent(targetFolder)}`);
+      const res = await fetch(`${API}/api/media/files?folder=${encodeURIComponent(targetFolder)}&session_id=${encodeURIComponent(sid)}`, {
+        headers: getHeaders(),
+        credentials: 'include',
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       _allFiles = data.files || [];
@@ -237,7 +306,7 @@ const MediaLibrary = (() => {
     grid.innerHTML = '';
 
     if (!files.length) {
-      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">📂</span>Nenhum arquivo nesta pasta.<br/>Clique na área acima para enviar!</div>';
+      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">📂</span>Nenhum arquivo nesta pasta.<br/>Arraste uma foto aqui para enviar!</div>';
       return;
     }
 
@@ -249,45 +318,60 @@ const MediaLibrary = (() => {
 
       if (isVideo) {
         div.innerHTML = `
-          <div class="thumb-icon-wrap">
-            <span class="thumb-play-icon">▶️</span>
-            <span class="video-filename">${_esc(file.name)}</span>
-          </div>
+          <video src="${_escAttr(file.url)}" muted preload="metadata"></video>
+          <div class="video-badge">▶ VÍDEO</div>
           <div class="file-thumb-overlay">
-            <button class="thumb-insert-btn" onclick="MediaLibrary.insertIntoEditor('${_escAttr(file.url)}', 'video')">▶ Inserir</button>
-            <button class="thumb-delete-btn" onclick="MediaLibrary.deleteFile('${_escAttr(_folder)}','${_escAttr(file.name)}')">Excluir</button>
+            <button class="thumb-btn insert" title="Inserir no documento" onclick="event.stopPropagation(); MediaLibrary.insertIntoEditor('${_escAttr(file.url)}', 'video')">
+              <span class="btn-icon">➕</span>
+              <span class="btn-txt">Inserir</span>
+            </button>
+            <button class="thumb-btn danger" title="Excluir do servidor" onclick="event.stopPropagation(); MediaLibrary.deleteFile('${_escAttr(file.name)}')">
+              <span class="btn-icon">🗑️</span>
+              <span class="btn-txt">Excluir</span>
+            </button>
           </div>
-          <div class="file-name-label">${_esc(file.name)}</div>`;
+          <div class="file-thumb-footer" title="${_escAttr(file.name)}">
+            <span class="file-thumb-name">${_esc(file.name)}</span>
+          </div>`;
       } else {
         div.innerHTML = `
           <img src="${_escAttr(file.url)}" alt="${_escAttr(file.name)}" loading="lazy" />
           <div class="file-thumb-overlay">
-            <button class="thumb-insert-btn" onclick="MediaLibrary.insertIntoEditor('${_escAttr(file.url)}', 'image')">+ Inserir</button>
-            <button class="thumb-delete-btn" onclick="MediaLibrary.deleteFile('${_escAttr(_folder)}','${_escAttr(file.name)}')">Excluir</button>
+            <button class="thumb-btn insert" title="Inserir no documento" onclick="event.stopPropagation(); MediaLibrary.insertIntoEditor('${_escAttr(file.url)}', 'image')">
+              <span class="btn-icon">➕</span>
+              <span class="btn-txt">Inserir</span>
+            </button>
+            <button class="thumb-btn danger" title="Excluir do servidor" onclick="event.stopPropagation(); MediaLibrary.deleteFile('${_escAttr(file.name)}')">
+              <span class="btn-icon">🗑️</span>
+              <span class="btn-txt">Excluir</span>
+            </button>
           </div>
-          <div class="file-name-label">${_esc(file.name)}</div>`;
+          <div class="file-thumb-footer" title="${_escAttr(file.name)}">
+            <span class="file-thumb-name">${_esc(file.name)}</span>
+          </div>`;
       }
+
+      div.addEventListener('click', () => {
+        insertIntoEditor(file.url, isVideo ? 'video' : 'image');
+      });
 
       grid.appendChild(div);
     });
   }
 
-  function filterFiles(query) {
-    if (!query) { _renderFiles(_allFiles); return; }
-    const q = query.toLowerCase();
-    _renderFiles(_allFiles.filter(f => f.name.toLowerCase().includes(q)));
-  }
-
-  async function deleteFile(folder, filename) {
-    if (!confirm(`Excluir o arquivo "${filename}" do servidor?`)) return;
+  async function deleteFile(filename, folder) {
+    if (!confirm(`Excluir "${filename}" permanentemente do servidor?`)) return;
     try {
-      const res = await fetch(`${API}/api/media/file`, {
+      const sid = getSessionId();
+      const res = await fetch(`${API}/api/media/file?session_id=${encodeURIComponent(sid)}`, {
         method:  'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getHeaders({ 'Content-Type': 'application/json' }),
+        credentials: 'include',
         body:    JSON.stringify({ folder: folder || _folder, filename }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await loadFiles(folder || _folder);
+      await loadFolders();
       _toast('Arquivo excluído com sucesso!', 'success');
     } catch {
       _toast('Erro ao excluir arquivo', 'error');
@@ -295,8 +379,19 @@ const MediaLibrary = (() => {
   }
 
   /* ══════════════════════════════════════════════════════════
-     UPLOAD (Drag & Drop + File Input Direto)
+     UPLOAD (Seguro, Multi-Tenant com Drag & Drop e Suporte Anônimo)
   ══════════════════════════════════════════════════════════ */
+  async function handleFileSelect(e) {
+    const files = Array.from(e.target?.files || e.dataTransfer?.files || []);
+    if (!files.length) return;
+    for (const file of files) {
+      await uploadFile(file);
+    }
+    if (e.target && e.target.tagName === 'INPUT') {
+      e.target.value = '';
+    }
+  }
+
   function triggerFileInput() {
     const fileInput = document.getElementById('media-file-input');
     if (fileInput) {
@@ -305,10 +400,12 @@ const MediaLibrary = (() => {
       const inp = document.createElement('input');
       inp.type = 'file';
       inp.multiple = true;
-      inp.accept = 'image/*,video/*';
-      inp.onchange = e => {
+      inp.accept = 'image/*,video/*,.jfif,.heic,.avif,.webp,.svg,.png,.jpg,.jpeg';
+      inp.onchange = async e => {
         const files = Array.from(e.target.files || []);
-        files.forEach(uploadFile);
+        for (const file of files) {
+          await uploadFile(file);
+        }
       };
       inp.click();
     }
@@ -319,11 +416,7 @@ const MediaLibrary = (() => {
     const fileInput = document.getElementById('media-file-input');
 
     if (fileInput) {
-      fileInput.onchange = e => {
-        const files = Array.from(e.target.files || []);
-        files.forEach(uploadFile);
-        fileInput.value = '';
-      };
+      fileInput.onchange = handleFileSelect;
     }
 
     if (zone) {
@@ -337,17 +430,14 @@ const MediaLibrary = (() => {
         zone.classList.remove('drag-over');
       };
 
-      zone.ondrop = e => {
+      zone.ondrop = async e => {
         e.preventDefault();
         zone.classList.remove('drag-over');
-        const files = Array.from(e.dataTransfer.files || []);
-        if (files.length > 0) {
-          files.forEach(uploadFile);
-        }
+        await handleFileSelect(e);
       };
 
       zone.onclick = e => {
-        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL' && e.target.tagName !== 'BUTTON') {
           triggerFileInput();
         }
       };
@@ -358,8 +448,14 @@ const MediaLibrary = (() => {
     if (!file) return;
 
     const targetFolder = _folder || 'Imagens';
+    const sid = getSessionId();
 
-    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+    const isAllowed =
+      (file.type && (file.type.startsWith('image/') || file.type.startsWith('video/'))) ||
+      IMAGE_EXTS.test(file.name) ||
+      VIDEO_EXTS.test(file.name);
+
+    if (!isAllowed) {
       _toast(`Formato não suportado: ${file.name}`, 'error');
       return;
     }
@@ -372,32 +468,40 @@ const MediaLibrary = (() => {
     try {
       const fd = new FormData();
       fd.append('folder', targetFolder);
+      fd.append('session_id', sid);
       fd.append('file', file);
 
       if (pb) pb.style.width = '70%';
 
-      const res = await fetch(`${API}/api/media/upload?folder=${encodeURIComponent(targetFolder)}`, {
-        method:  'POST',
-        headers: { 'x-folder': encodeURIComponent(targetFolder) },
-        body:    fd,
+      const res = await fetch(`${API}/api/media/upload?folder=${encodeURIComponent(targetFolder)}&session_id=${encodeURIComponent(sid)}`, {
+        method:      'POST',
+        headers:     getHeaders({ 'x-folder': encodeURIComponent(targetFolder) }),
+        credentials: 'include',
+        body:        fd,
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `HTTP ${res.status}`);
+      }
       const data = await res.json();
+
+      if (data.sessionId) setSessionId(data.sessionId);
 
       if (pb) pb.style.width = '100%';
       setTimeout(() => {
         if (wrap) wrap.style.display = 'none';
         if (pb)   pb.style.width = '0%';
-      }, 500);
+      }, 400);
 
       await loadFiles(targetFolder);
-      _toast(`"${file.name}" salva no servidor!`, 'success');
+      await loadFolders();
+      _toast(`"${file.name}" salva com segurança!`, 'success');
 
       return data;
     } catch (err) {
       if (wrap) wrap.style.display = 'none';
-      _toast(`Falha no upload de "${file.name}"`, 'error');
+      _toast(`Falha no upload: ${err.message}`, 'error');
       console.error('[MediaLibrary] Erro de upload:', err);
     }
   }
@@ -411,165 +515,158 @@ const MediaLibrary = (() => {
     if (type === 'image') {
       let inserted = false;
 
-      // 1. Tenta método nativo do CKEditor 5
-      if (editor && editor.model) {
+      // 1. Tenta comando oficial de imagem do CKEditor 5
+      if (editor && typeof editor.execute === 'function') {
         try {
-          editor.editing?.view?.focus();
-
-          // Tenta comando insertImage
-          if (editor.commands?.get('insertImage')?.isEnabled !== false) {
-            try {
-              editor.execute('insertImage', { source: url });
-              inserted = true;
-            } catch (e1) {
-              console.warn('[MediaLibrary] execute(insertImage) falhou:', e1);
-            }
-          }
-
-          // Se comando não executou, insere direto no Model
-          if (!inserted) {
+          editor.editing.view.focus();
+          editor.execute('insertImage', { source: url });
+          inserted = true;
+        } catch {
+          try {
             editor.model.change(writer => {
               const imageElement = writer.createElement('imageBlock', { src: url });
               editor.model.insertContent(imageElement, editor.model.document.selection);
-              inserted = true;
             });
-          }
-        } catch (ckErr) {
-          console.warn('[MediaLibrary] CKEditor model insert falhou:', ckErr);
+            inserted = true;
+          } catch {}
         }
       }
 
-      // 2. Fallback direto no DOM (HTML nativo ou se CKEditor estiver indisponível)
+      // 2. Fallback robusto no DOM (Editor Nativo Vintage)
       if (!inserted) {
-        const editableEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
-        if (editableEl) {
-          editableEl.focus();
+        const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+        if (editorEl) {
+          editorEl.focus();
+
+          const figure = document.createElement('figure');
+          figure.className = 'image image-style-align-center';
+          figure.style.margin = '16px auto';
+          figure.style.display = 'table';
+          figure.style.maxWidth = '100%';
+
           const img = document.createElement('img');
           img.src = url;
           img.alt = 'Imagem inserida';
           img.style.maxWidth = '100%';
           img.style.height = 'auto';
-          img.style.margin = '10px 0';
           img.style.display = 'block';
 
-          // Insere na seleção atual do usuário se houver, ou no final do editor
+          figure.appendChild(img);
+
+          // Tenta inserir na posição da seleção do usuário
           const sel = window.getSelection();
-          if (sel && sel.rangeCount > 0 && editableEl.contains(sel.anchorNode)) {
+          if (sel && sel.rangeCount > 0 && editorEl.contains(sel.anchorNode)) {
             const range = sel.getRangeAt(0);
-            range.collapse(false);
-            range.insertNode(img);
-            range.collapse(false);
+            range.deleteContents();
+            range.insertNode(figure);
           } else {
-            editableEl.appendChild(img);
+            editorEl.appendChild(figure);
           }
+
+          editorEl.dispatchEvent(new Event('input', { bubbles: true }));
           inserted = true;
         }
       }
 
       if (inserted) {
-        _toast('✅ Imagem inserida no documento!', 'success');
+        _toast('Imagem inserida na folha!', 'success');
+        setTimeout(() => {
+          const addedImg = document.querySelector(`img[src="${url}"]`);
+          if (addedImg && window.ImageResizer) {
+            window.ImageResizer.selectImage(addedImg);
+          }
+        }, 150);
       } else {
-        _toast('Erro ao inserir imagem no documento', 'error');
+        _toast('Clique na folha para posicionar o cursor antes de inserir.', 'warning');
       }
 
     } else {
-      // Inserção de link/vídeo
-      let inserted = false;
-      if (editor && editor.model) {
-        try {
-          editor.editing?.view?.focus();
-          editor.model.change(writer => {
-            const pos = editor.model.document.selection.getFirstPosition();
-            writer.insertText(` [Vídeo: ${url}] `, pos);
-            inserted = true;
-          });
-        } catch (e) {
-          console.warn(e);
-        }
+      // Inserção de Vídeo
+      const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+      if (editorEl) {
+        const video = document.createElement('video');
+        video.src = url;
+        video.controls = true;
+        video.style.maxWidth = '100%';
+        video.style.margin = '10px 0';
+        editorEl.appendChild(video);
+        editorEl.dispatchEvent(new Event('input', { bubbles: true }));
+        _toast('Vídeo inserido no documento!', 'success');
       }
-
-      if (!inserted) {
-        const editableEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
-        if (editableEl) {
-          const p = document.createElement('p');
-          p.innerHTML = `🎥 <a href="${url}" target="_blank" style="color:var(--burnt-orange)">Vídeo: ${url}</a>`;
-          editableEl.appendChild(p);
-          inserted = true;
-        }
-      }
-
-      if (inserted) _toast('Referência de vídeo inserida!', 'info');
     }
   }
 
-  /* ──────────────────────────────────────────────────────────
-     Busca
-  ────────────────────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════
+     BUSCA EM TEMPO REAL
+  ══════════════════════════════════════════════════════════ */
   function _setupSearch() {
-    const inp = document.getElementById('media-search-input');
-    if (!inp) return;
-    let debounce;
-    inp.addEventListener('input', () => {
-      clearTimeout(debounce);
-      debounce = setTimeout(() => filterFiles(inp.value), 180);
+    const input = document.getElementById('media-search-input') || document.getElementById('media-search');
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const q = input.value.trim().toLowerCase();
+      if (!q) {
+        _renderFiles(_allFiles);
+        return;
+      }
+      const filtered = _allFiles.filter(f => f.name.toLowerCase().includes(q));
+      _renderFiles(filtered);
     });
   }
 
-  /* ──────────────────────────────────────────────────────────
-     Modo Offline / Feedback
-  ────────────────────────────────────────────────────────── */
   function _showOfflineNotice() {
-    const body = document.querySelector('.drawer-body');
-    if (!body) return;
-    const existing = body.querySelector('.drawer-offline-notice');
-    if (existing) return;
-
-    const notice = document.createElement('div');
-    notice.className = 'drawer-offline-notice';
-    notice.innerHTML = `⚠️ <strong>Serviço de Mídia Desconectado.</strong><br/>Certifique-se de que o servidor Node.js está rodando em <code>http://localhost:3000</code>.`;
-    body.prepend(notice);
-  }
-
-  /* ──────────────────────────────────────────────────────────
-     Utilitários
-  ────────────────────────────────────────────────────────── */
-  function _esc(str) {
-    return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
-
-  function _escAttr(str) {
-    return String(str || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const grid = document.getElementById('files-grid');
+    if (grid) {
+      grid.innerHTML = '<div class="files-empty"><span class="files-empty-icon">🔌</span>Servidor local desconectado.<br/><small>Inicie com node server.js</small></div>';
+    }
   }
 
   function _toast(msg, type) {
     window.showToast?.(msg, type);
   }
 
-  /* ══════════════════════════════════════════════════════════
-     API PÚBLICA
-  ══════════════════════════════════════════════════════════ */
+  function _esc(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _escAttr(str) {
+    return String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // Auto-inicialização caso o DOM já esteja pronto
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        _setupDragDrop();
+        _setupSearch();
+        loadFolders();
+      });
+    } else {
+      setTimeout(() => {
+        _setupDragDrop();
+        _setupSearch();
+        loadFolders();
+      }, 50);
+    }
+  }
+
   return {
     init,
     openDrawer,
     closeDrawer,
     toggleDrawer,
     loadFolders,
-    loadFiles,
     selectFolder,
     createFolder,
     showCreateFolderInput,
     promptRename,
     promptDelete,
-    triggerFileInput,
+    loadFiles,
     uploadFile,
     deleteFile,
-    filterFiles,
+    triggerFileInput,
+    handleFileSelect,
     insertIntoEditor,
+    getSessionId,
   };
 
 })();
-
-// Auto-inicializa os listeners do DOM assim que carregado
-document.addEventListener('DOMContentLoaded', () => {
-  MediaLibrary.init(null);
-});

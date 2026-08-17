@@ -17,6 +17,13 @@ const EditorApp = (() => {
   let _activeLinkNode  = null;
   let _balloonHoverEl  = null;
 
+  function _getStorageKey() {
+    const sid = window.MediaLibrary?.getSessionId() || localStorage.getItem('wm_session_id') || 'default';
+    const params = new URLSearchParams(window.location.search);
+    const docId = params.get('doc') || 'main';
+    return `wm_doc_${sid}_${docId}`;
+  }
+
   /* ══════════════════════════════════════════════════════════
      PALETA DE CORES TEMÁTICA
   ══════════════════════════════════════════════════════════ */
@@ -48,8 +55,9 @@ const EditorApp = (() => {
     const editorEl = document.getElementById('editor');
     if (!editorEl) return;
 
-    // Restaura conteúdo salvo
-    const saved = localStorage.getItem(STORAGE_KEY);
+    // Restaura conteúdo salvo da sessão atual
+    const storageKey = _getStorageKey();
+    const saved = localStorage.getItem(storageKey) || localStorage.getItem(STORAGE_KEY);
     if (saved && saved.trim()) {
       editorEl.innerHTML = saved;
     }
@@ -71,7 +79,8 @@ const EditorApp = (() => {
             'PresenceList', 'Comments', 'TrackChanges', 'TrackChangesData',
             'RevisionHistory', 'Pagination', 'WProofreader', 'MathType',
             'SlashCommand', 'Template', 'DocumentOutline', 'FormatPainter',
-            'TableOfContents', 'PasteFromOfficeEnhanced', 'CaseChange'
+            'TableOfContents', 'PasteFromOfficeEnhanced', 'CaseChange',
+            'AITextAdapter', 'OpenAITextAdapter', 'AIChat', 'MultiLevelList'
           ],
 
           toolbar: {
@@ -657,7 +666,8 @@ const EditorApp = (() => {
     _autoTimer = setTimeout(() => {
       const content = getData();
       if (content !== undefined && content.trim()) {
-        localStorage.setItem(STORAGE_KEY, content);
+        const storageKey = _getStorageKey();
+        localStorage.setItem(storageKey, content);
         const now = new Date();
         const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         if (ind) {

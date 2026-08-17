@@ -1044,16 +1044,26 @@
   caption-side: bottom;
 }
 
+figure.image {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+figure.image img {
+  width: 100%;
+  height: auto;
+  display: block;
+  box-sizing: border-box;
+}
+
 .image-style-side, .image-style-align-right {
   float: right !important;
   margin: 10px 0 14px 20px !important;
-  max-width: 55% !important;
 }
 
 .image-style-align-left {
   float: left !important;
   margin: 10px 20px 14px 0 !important;
-  max-width: 55% !important;
 }
 
 .image-style-align-center {
