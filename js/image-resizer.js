@@ -288,12 +288,19 @@ const ImageResizer = (() => {
     e.preventDefault();
     e.stopPropagation();
 
+    const targetEl = _activeImg.closest('figure.image') || _activeImg;
+    const sheet    = document.getElementById('page-sheet');
+    sheet.style.position = 'relative';
+
+    // Se estiver em modo texto mas o usuário clicou para arrastar livremente, ativa modo livre automático
+    if (!_isFreeFloating(_activeImg)) {
+      _enableFreeMode(targetEl, sheet);
+    }
+
     _isMoving = true;
     _startX   = e.clientX;
     _startY   = e.clientY;
 
-    const targetEl  = _activeImg.closest('figure.image') || _activeImg;
-    const sheet     = document.getElementById('page-sheet');
     const sheetRect = sheet.getBoundingClientRect();
     const elRect    = targetEl.getBoundingClientRect();
 
@@ -543,6 +550,36 @@ const ImageResizer = (() => {
   /* ──────────────────────────────────────────────────────────
      Alterna entre Modo Livre e Modo No Texto
   ────────────────────────────────────────────────────────── */
+  function _enableFreeMode(targetEl, sheet) {
+    const sheetRect  = sheet.getBoundingClientRect();
+    const targetRect = targetEl.getBoundingClientRect();
+
+    let left = targetRect.left - sheetRect.left;
+    let top  = targetRect.top - sheetRect.top;
+
+    sheet.style.position = 'relative';
+
+    const maxLeft = Math.max(0, sheet.clientWidth - targetRect.width);
+    const maxTop  = Math.max(0, sheet.clientHeight - targetRect.height);
+
+    left = Math.max(0, Math.min(left, maxLeft));
+    top  = Math.max(0, Math.min(top, maxTop));
+
+    // Desacopla do fluxo do parágrafo: anexa diretamente à folha para ter eixo 100% independente
+    if (targetEl.parentNode !== sheet) {
+      sheet.appendChild(targetEl);
+    }
+
+    targetEl.style.position = 'absolute';
+    targetEl.style.left     = `${Math.round(left)}px`;
+    targetEl.style.top      = `${Math.round(top)}px`;
+    targetEl.style.zIndex   = targetEl.style.zIndex || '10';
+    targetEl.style.float    = 'none';
+    targetEl.style.margin   = '0';
+
+    _updateModeButtonText();
+  }
+
   function _toggleFreeFloating() {
     if (!_activeImg) return;
     const targetEl = _activeImg.closest('figure.image') || _activeImg;
@@ -558,7 +595,12 @@ const ImageResizer = (() => {
     }
 
     if (isFree) {
-      // Volta para o fluxo do texto
+      // Volta para o fluxo do texto dentro do editor
+      const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+      if (editorEl && targetEl.parentNode !== editorEl) {
+        editorEl.appendChild(targetEl);
+      }
+
       targetEl.style.position = '';
       targetEl.style.left     = '';
       targetEl.style.top      = '';
@@ -566,29 +608,9 @@ const ImageResizer = (() => {
       _applyAlignment('center');
       window.showToast?.('Modo de fluxo de texto ativado', 'info');
     } else {
-      // Ativa modo livre absoluto dentro da folha
-      const sheetRect  = sheet.getBoundingClientRect();
-      const targetRect = targetEl.getBoundingClientRect();
-
-      let left = targetRect.left - sheetRect.left;
-      let top  = targetRect.top - sheetRect.top;
-
-      sheet.style.position = 'relative';
-
-      const maxLeft = Math.max(0, sheet.clientWidth - targetRect.width);
-      const maxTop  = Math.max(0, sheet.clientHeight - targetRect.height);
-
-      left = Math.max(0, Math.min(left, maxLeft));
-      top  = Math.max(0, Math.min(top, maxTop));
-
-      targetEl.style.position = 'absolute';
-      targetEl.style.left     = `${Math.round(left)}px`;
-      targetEl.style.top      = `${Math.round(top)}px`;
-      targetEl.style.zIndex   = '10';
-      targetEl.style.float    = 'none';
-      targetEl.style.margin   = '0';
-
-      window.showToast?.('Modo Livre ativado! Ajuste posição e camadas livremente.', 'success');
+      // Ativa modo livre absoluto e desacoplado
+      _enableFreeMode(targetEl, sheet);
+      window.showToast?.('Modo Livre ativado! Eixo 100% independente.', 'success');
     }
 
     document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
