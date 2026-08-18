@@ -682,6 +682,19 @@ const EditorApp = (() => {
      API PÚBLICA
   ══════════════════════════════════════════════════════════ */
   function getData() {
+    const sheet = document.getElementById('page-sheet');
+    const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+
+    // Se houver imagens em modo livre no page-sheet, captura o conjunto completo unificado
+    if (sheet) {
+      const freeImgs = sheet.querySelectorAll(':scope > figure.image, :scope > img');
+      if (freeImgs.length > 0) {
+        const clone = sheet.cloneNode(true);
+        clone.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle').forEach(el => el.remove());
+        return clone.innerHTML;
+      }
+    }
+
     if (_instance) {
       try {
         const data = _instance.getData();
@@ -689,18 +702,11 @@ const EditorApp = (() => {
       } catch {}
     }
 
-    const ckEditable = document.querySelector('.ck-editor__editable');
-    if (ckEditable && ckEditable.innerHTML && ckEditable.innerHTML.trim()) {
-      return ckEditable.innerHTML;
+    if (editorEl && editorEl.innerHTML && editorEl.innerHTML.trim()) {
+      return editorEl.innerHTML;
     }
 
-    const el = document.getElementById('editor');
-    if (el && el.innerHTML && el.innerHTML.trim()) {
-      return el.innerHTML;
-    }
-
-    const pageSheet = document.getElementById('page-sheet');
-    return pageSheet ? pageSheet.innerHTML : '';
+    return sheet ? sheet.innerHTML : '';
   }
 
   function getInstance() {

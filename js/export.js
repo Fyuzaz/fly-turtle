@@ -20,31 +20,21 @@ const Exporter = (() => {
      OBTER CONTEÚDO HTML DO DOCUMENTO (Multi-Estratégia)
   ══════════════════════════════════════════════════════════ */
   function getDocumentHtml() {
-    // 1. Tenta dados oficiais do CKEditor
-    let html = window.EditorApp?.getData() || '';
-    if (html && html.trim() && html !== '<p>&nbsp;</p>' && html !== '<p></p>') {
-      return html;
-    }
-
-    // 2. Tenta capturar o container editável do CKEditor
-    const ckEditable = document.querySelector('.ck-editor__editable');
-    if (ckEditable && ckEditable.innerHTML && ckEditable.innerHTML.trim()) {
-      return ckEditable.innerHTML;
-    }
-
-    // 3. Tenta o elemento #editor
-    const editorEl = document.getElementById('editor');
-    if (editorEl && editorEl.innerHTML && editorEl.innerHTML.trim()) {
-      return editorEl.innerHTML;
-    }
-
-    // 4. Tenta o elemento da folha #page-sheet
     const sheet = document.getElementById('page-sheet');
-    if (sheet && sheet.innerHTML) {
-      return sheet.innerHTML;
+    const editor = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+
+    if (!sheet) {
+      return editor ? editor.innerHTML : (window.EditorApp?.getData() || '');
     }
 
-    return '';
+    // Clona o page-sheet para capturar fielmente texto e imagens livres
+    const clone = sheet.cloneNode(true);
+
+    // Remove overlays de controle de UI (resizer, drop indicators)
+    clone.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle').forEach(el => el.remove());
+
+    // Se o clone contiver o editor interno, extrai o conteúdo preservando elementos absolutos
+    return clone.innerHTML;
   }
 
   /* ══════════════════════════════════════════════════════════

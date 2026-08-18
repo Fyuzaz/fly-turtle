@@ -87,6 +87,29 @@ const exportLimiter = rateLimit({
 /* ══════════════════════════════════════════════════════════
    MIDDLEWARE DE SESSÃO MULTI-INQUILINO (Deterministic Session ID)
 ══════════════════════════════════════════════════════════ */
+const _initializedSessions = new Set();
+const MAX_SESSION_CACHE = 10000;
+
+function ensureSessionWorkspace(sessionId) {
+  if (!sessionId) return;
+  // Se já foi inicializado nesta instância do servidor, pula 100% das chamadas de disco
+  if (_initializedSessions.has(sessionId)) return;
+
+  const sessionPath = path.join(SESSIONS_DIR, sessionId);
+  if (!fs.existsSync(sessionPath)) {
+    fs.mkdirSync(sessionPath, { recursive: true });
+  }
+  DEFAULT_SUBFOLDERS.forEach(sub => {
+    const subPath = path.join(sessionPath, sub);
+    if (!fs.existsSync(subPath)) fs.mkdirSync(subPath, { recursive: true });
+  });
+
+  if (_initializedSessions.size >= MAX_SESSION_CACHE) {
+    _initializedSessions.clear();
+  }
+  _initializedSessions.add(sessionId);
+}
+
 function sessionMiddleware(req, res, next) {
   let rawSession =
     req.headers['x-session-id'] ||
@@ -94,9 +117,17 @@ function sessionMiddleware(req, res, next) {
     req.body?.session_id ||
     req.cookies?.wm_session_id;
 
-  let sessionId = 'default_session';
+  let sessionId = null;
   if (typeof rawSession === 'string' && rawSession.trim()) {
-    sessionId = rawSession.trim().replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64) || 'default_session';
+    const sanitized = rawSession.trim().replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64);
+    if (sanitized.length >= 6) {
+      sessionId = sanitized;
+    }
+  }
+
+  // Gera UUID dinâmico criptográfico para sessões sem token, impedindo agrupamento compartilhado
+  if (!sessionId) {
+    sessionId = `sess_${crypto.randomUUID()}`;
   }
 
   req.sessionId = sessionId;
@@ -114,20 +145,10 @@ function sessionMiddleware(req, res, next) {
 
 app.use(sessionMiddleware);
 
-function ensureSessionWorkspace(sessionId) {
-  const sessionPath = path.join(SESSIONS_DIR, sessionId);
-  if (!fs.existsSync(sessionPath)) {
-    fs.mkdirSync(sessionPath, { recursive: true });
-  }
-  DEFAULT_SUBFOLDERS.forEach(sub => {
-    const subPath = path.join(sessionPath, sub);
-    if (!fs.existsSync(subPath)) fs.mkdirSync(subPath, { recursive: true });
-  });
-}
-
 function resolveSafeSessionDir(sessionId, folderName = 'Imagens', autoCreate = true) {
   const safeFolder = (folderName || 'Imagens').replace(/[^a-zA-Z0-9 À-ÿ\-_]/g, '').trim() || 'Imagens';
-  const sessionBase = path.resolve(SESSIONS_DIR, sessionId || 'default_session');
+  const sid = (sessionId && typeof sessionId === 'string' && sessionId.trim()) ? sessionId.trim() : `sess_${crypto.randomUUID()}`;
+  const sessionBase = path.resolve(SESSIONS_DIR, sid);
   const targetDir   = path.resolve(sessionBase, safeFolder);
 
   // Verificação Canônica de Path Traversal
@@ -142,9 +163,27 @@ function resolveSafeSessionDir(sessionId, folderName = 'Imagens', autoCreate = t
   return { targetDir, safeFolder, sessionBase };
 }
 
-function getSessionUsedBytes(sessionId) {
-  const sessionBase = path.join(SESSIONS_DIR, sessionId || 'default_session');
-  if (!fs.existsSync(sessionBase)) return 0;
+const _sessionBytesCache = new Map();
+const QUOTA_CACHE_TTL_MS = 30 * 1000; // 30 segundos de cache
+const MAX_QUOTA_CACHE_SIZE = 10000;
+
+function getSessionUsedBytes(sessionId, forceRecalculate = false) {
+  if (!sessionId) return 0;
+  const sid = sessionId;
+  const now = Date.now();
+
+  if (!forceRecalculate && _sessionBytesCache.has(sid)) {
+    const cached = _sessionBytesCache.get(sid);
+    if (now - cached.timestamp < QUOTA_CACHE_TTL_MS) {
+      return cached.bytes;
+    }
+  }
+
+  const sessionBase = path.join(SESSIONS_DIR, sid);
+  if (!fs.existsSync(sessionBase)) {
+    _sessionBytesCache.set(sid, { bytes: 0, timestamp: now });
+    return 0;
+  }
 
   let total = 0;
   const scan = dir => {
@@ -156,6 +195,12 @@ function getSessionUsedBytes(sessionId) {
     }
   };
   scan(sessionBase);
+
+  if (_sessionBytesCache.size >= MAX_QUOTA_CACHE_SIZE) {
+    _sessionBytesCache.clear();
+  }
+  _sessionBytesCache.set(sid, { bytes: total, timestamp: now });
+
   return total;
 }
 
@@ -309,11 +354,41 @@ async function renderWithPuppeteer(fullHtml, options = {}) {
 }
 
 /* ══════════════════════════════════════════════════════════
+   UTILITÁRIO: EMBUTIR IMAGENS LOCAIS COMO BASE64 PARA PDF/PNG
+══════════════════════════════════════════════════════════ */
+function inlineLocalImages(html) {
+  if (!html) return html;
+  return html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (match, before, src, after) => {
+    try {
+      if (src.startsWith('data:')) return match;
+
+      let localPath = null;
+      if (src.includes('/media/')) {
+        const mediaSub = src.substring(src.indexOf('/media/') + '/media/'.length);
+        const decoded = decodeURIComponent(mediaSub.split('?')[0]);
+        localPath = path.join(MEDIA_ROOT, decoded);
+      }
+
+      if (localPath && fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+        const buffer = fs.readFileSync(localPath);
+        const mime = _guessMime(localPath);
+        const b64 = `data:${mime};base64,${buffer.toString('base64')}`;
+        return `<img ${before}src="${b64}"${after}>`;
+      }
+    } catch (err) {
+      console.warn('[inlineLocalImages] Erro ao embutir imagem:', err.message);
+    }
+    return match;
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
    ROTAS DE EXPORTAÇÃO (PDF / PNG)
 ══════════════════════════════════════════════════════════ */
 app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   const { html = '', pageWidth = 210, pageHeight = 297, landscape = false } = req.body;
-  const cleanHtml = sanitize(html);
+  const inlinedHtml = inlineLocalImages(html);
+  const cleanHtml   = sanitize(inlinedHtml);
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
@@ -340,7 +415,19 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   th, td { border: 1px solid #111111; padding: 7pt 10pt; }
   th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 11pt; letter-spacing: 0.04em; }
   tr:nth-child(even) td { background: rgba(243, 233, 210, 0.4); }
-  img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; margin: 10px auto; }
+  
+  figure.image { box-sizing: border-box; max-width: 100%; margin: 12pt auto; display: table; }
+  figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
+  figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111111; }
+  img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; }
+  
+  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor { background: transparent !important; }
+
+  .image-style-align-left  { float: left !important; margin: 8pt 16pt 12pt 0 !important; }
+  .image-style-align-right { float: right !important; margin: 8pt 0 12pt 16pt !important; }
+  .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
+  .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
+
   blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; }
   a { color: #D95D39; text-decoration: underline; }
   pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
@@ -373,8 +460,9 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
 
 app.post('/api/export/img', exportLimiter, async (req, res) => {
   const { html = '', pageWidth = 210, pageHeight = 297 } = req.body;
-  const cleanHtml = sanitize(html);
-  const MM_TO_PX  = 3.7795275591;
+  const inlinedHtml = inlineLocalImages(html);
+  const cleanHtml   = sanitize(inlinedHtml);
+  const MM_TO_PX    = 3.7795275591;
   const vpW = Math.round(pageWidth  * MM_TO_PX);
   const vpH = Math.round(pageHeight * MM_TO_PX);
 
@@ -395,7 +483,19 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
   table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 2px solid #111; }
   th, td { border: 1px solid #111; padding: 7pt 10pt; }
   th { background: #111; color: #F3E9D2; }
-  img { max-width: 100%; border: 2px solid #111; }
+  
+  figure.image { box-sizing: border-box; max-width: 100%; margin: 12px auto; display: table; }
+  figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
+  figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111; }
+  img { max-width: 100%; height: auto; border: 2px solid #111; display: block; }
+  
+  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor { background: transparent !important; }
+
+  .image-style-align-left  { float: left !important; margin: 8px 16px 12px 0 !important; }
+  .image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
+  .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
+  .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
+
   blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
@@ -496,6 +596,7 @@ app.delete('/api/media/folder', (req, res) => {
     if (!fs.existsSync(targetDir)) return res.status(404).json({ error: 'Pasta não encontrada.' });
 
     fs.rmSync(targetDir, { recursive: true, force: true });
+    _sessionBytesCache.delete(req.sessionId);
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -579,6 +680,15 @@ app.post('/api/media/upload', upload.single('file'), (req, res) => {
 
     fs.writeFileSync(destinationPath, req.file.buffer);
 
+    // Atualiza cache de cota incrementalmente sem re-varrer o disco
+    if (_sessionBytesCache.has(req.sessionId)) {
+      const cached = _sessionBytesCache.get(req.sessionId);
+      cached.bytes += req.file.size;
+      cached.timestamp = Date.now();
+    } else {
+      _sessionBytesCache.set(req.sessionId, { bytes: req.file.size, timestamp: Date.now() });
+    }
+
     const fileUrl = `http://localhost:${PORT}/media/sessions/${encodeURIComponent(req.sessionId)}/${encodeURIComponent(safeFolder)}/${encodeURIComponent(filename)}`;
 
     res.json({
@@ -604,6 +714,7 @@ app.delete('/api/media/file', (req, res) => {
 
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
+      _sessionBytesCache.delete(req.sessionId);
     }
     res.json({ ok: true });
   } catch (err) {
@@ -623,32 +734,72 @@ function _guessMime(filename) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   SESSION GARBAGE COLLECTOR (Limpeza a cada 6h de sessões com > 48h)
+   SESSION GARBAGE COLLECTOR (Limpeza Inteligente de Sessões Abandonadas)
 ══════════════════════════════════════════════════════════ */
-const SESSION_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const SESSION_MAX_AGE_MS = 15 * 24 * 60 * 60 * 1000; // 15 dias de inatividade
 
-function runSessionGarbageCollector() {
+function _getSessionLatestMtime(sessionPath) {
+  let latest = 0;
   try {
-    if (!fs.existsSync(SESSIONS_DIR)) return;
+    const rootStat = fs.statSync(sessionPath);
+    latest = rootStat.mtimeMs;
+
+    const scan = dir => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          const s = fs.statSync(full);
+          if (s.mtimeMs > latest) latest = s.mtimeMs;
+          scan(full);
+        } else if (e.isFile()) {
+          const s = fs.statSync(full);
+          if (s.mtimeMs > latest) latest = s.mtimeMs;
+        }
+      }
+    };
+    scan(sessionPath);
+  } catch {}
+  return latest;
+}
+
+function runSessionGarbageCollector(maxAgeMs = SESSION_MAX_AGE_MS) {
+  let cleanedCount = 0;
+  let freedBytes   = 0;
+  try {
+    if (!fs.existsSync(SESSIONS_DIR)) return { cleanedCount, freedBytes };
     const now = Date.now();
     const sessions = fs.readdirSync(SESSIONS_DIR, { withFileTypes: true });
 
     for (const s of sessions) {
       if (s.isDirectory() && s.name !== 'default_session') {
         const sessionPath = path.join(SESSIONS_DIR, s.name);
-        const stat = fs.statSync(sessionPath);
-        if (now - stat.mtimeMs > SESSION_MAX_AGE_MS) {
+        const lastActive = _getSessionLatestMtime(sessionPath);
+
+        if (now - lastActive > maxAgeMs) {
+          const bytes = getSessionUsedBytes(s.name, true);
           fs.rmSync(sessionPath, { recursive: true, force: true });
-          console.log(`🧹 [GarbageCollector] Sessão inativa removida: ${s.name}`);
+          _initializedSessions.delete(s.name);
+          _sessionBytesCache.delete(s.name);
+          cleanedCount++;
+          freedBytes += bytes;
+          console.log(`🧹 [GarbageCollector] Sessão inativa removida: ${s.name} (${(bytes / 1024).toFixed(1)} KB liberados)`);
         }
       }
+    }
+    if (cleanedCount > 0) {
+      console.log(`🧹 [GarbageCollector] Limpeza concluída: ${cleanedCount} sessões removidas, ${(freedBytes / (1024 * 1024)).toFixed(2)} MB liberados.`);
     }
   } catch (gcErr) {
     console.error('[GarbageCollector] Erro durante limpeza:', gcErr.message);
   }
+  return { cleanedCount, freedBytes };
 }
 
-setInterval(runSessionGarbageCollector, 6 * 60 * 60 * 1000);
+// Executa limpeza 3s após ligar o servidor e depois a cada 6h
+setTimeout(() => runSessionGarbageCollector(), 3000).unref();
+const gcInterval = setInterval(runSessionGarbageCollector, 6 * 60 * 60 * 1000);
+gcInterval.unref();
 
 /* ══════════════════════════════════════════════════════════
    INICIALIZAÇÃO DO SERVIDOR
