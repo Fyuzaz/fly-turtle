@@ -1,7 +1,7 @@
 /**
  * page-formats.js
  * Sistema central de formatos de página — presets ISO/Norte-Americano + tamanhos customizados
- * Editor Web de Documentos
+ * Editor Web de Documentos — "The Midnight Bat-Tortoise" Edition
  */
 
 const PageFormats = (() => {
@@ -66,12 +66,29 @@ const PageFormats = (() => {
   }
 
   /* ──────────────────────────────────────────────────────────
-     Resolver dimensões de um formato por nome
+     Resolver dimensões de um formato por nome ou padrão
   ────────────────────────────────────────────────────────── */
   function _resolve(name) {
-    if (PRESETS[name]) return { ...PRESETS[name] };
+    if (!name) return null;
+    const clean = String(name).trim();
+
+    // 1. Presets padrão
+    if (PRESETS[clean]) return { ...PRESETS[clean] };
+
+    // 2. Formatos personalizados salvos
     const c = _getCustoms();
-    if (c[name]) return { ...c[name] };
+    if (c[clean]) return { ...c[clean] };
+
+    // 3. Resolução automática de strings de dimensão: ex: "150×200mm", "150x200", "85×55mm"
+    const match = clean.match(/^(\d+(?:\.\d+)?)\s*[×xX]\s*(\d+(?:\.\d+)?)(?:mm)?$/i);
+    if (match) {
+      const w = parseFloat(match[1]);
+      const h = parseFloat(match[2]);
+      if (w >= 10 && h >= 10) {
+        return { width: w, height: h };
+      }
+    }
+
     return null;
   }
 
@@ -132,7 +149,7 @@ const PageFormats = (() => {
   }
 
   /**
-   * Aplica um tamanho customizado sem salvar como formato.
+   * Aplica um tamanho customizado sem salvar como formato permanente.
    * Útil para preview em tempo real no modal.
    */
   function previewCustom(widthVal, heightVal, unit = 'mm') {
@@ -143,33 +160,46 @@ const PageFormats = (() => {
   }
 
   /**
+   * Aplica e registra um tamanho customizado (com ou sem nome permanente).
+   * Garante que getCurrent() retorne exatamente a largura e altura definidas.
+   */
+  function applyCustom(widthVal, heightVal, unit = 'mm', customName = null) {
+    const w = Math.round(toMm(widthVal, unit));
+    const h = Math.round(toMm(heightVal, unit));
+    if (!w || !h || w < 10 || h < 10) throw new Error('Dimensões inválidas (mínimo 10mm).');
+
+    let name = (customName || '').trim();
+    if (!name) {
+      name = `${w}×${h}mm`;
+    }
+
+    // Salva nos formatos customizados do usuário
+    const customs = _getCustoms();
+    customs[name] = { width: w, height: h };
+    _saveCustoms(customs);
+
+    _currentName = name;
+    let finalW = w;
+    let finalH = h;
+    if (_isLandscape) [finalW, finalH] = [h, w];
+
+    _applyCSS(finalW, finalH);
+    localStorage.setItem(KEYS.FORMAT, name);
+
+    window.dispatchEvent(new CustomEvent('customFormatsUpdated'));
+    _emit(name, finalW, finalH);
+
+    return { name, width: finalW, height: finalH };
+  }
+
+  /**
    * Aplica e salva um formato customizado.
-   * @param {string} name
-   * @param {number} widthVal
-   * @param {number} heightVal
-   * @param {string} unit     — 'mm' | 'cm' | 'px' | 'in'
    */
   function saveAndApplyCustom(name, widthVal, heightVal, unit = 'mm') {
     const trimmed = (name || '').trim();
-    if (!trimmed)          throw new Error('Informe um nome para o formato.');
-    if (PRESETS[trimmed])  throw new Error('Esse nome já pertence a um formato padrão.');
-
-    const w = toMm(widthVal, unit);
-    const h = toMm(heightVal, unit);
-    if (!w || w < 10 || !h || h < 10) throw new Error('Dimensões inválidas (mínimo 10mm).');
-
-    const customs = _getCustoms();
-    customs[trimmed] = { width: w, height: h };
-    _saveCustoms(customs);
-
-    _currentName = trimmed;
-    _applyCSS(_isLandscape ? h : w, _isLandscape ? w : h);
-    localStorage.setItem(KEYS.FORMAT, trimmed);
-
-    window.dispatchEvent(new CustomEvent('customFormatsUpdated'));
-    _emit(trimmed, _isLandscape ? h : w, _isLandscape ? w : h);
-
-    return { name: trimmed, width: w, height: h };
+    if (!trimmed) throw new Error('Informe um nome para o formato.');
+    if (PRESETS[trimmed]) throw new Error('Esse nome já pertence a um formato padrão.');
+    return applyCustom(widthVal, heightVal, unit, trimmed);
   }
 
   /**
@@ -205,13 +235,18 @@ const PageFormats = (() => {
   }
 
   /**
-   * Retorna o estado atual do formato ativo.
+   * Retorna o estado atual do formato ativo (sempre com largura e altura exatas em mm).
    */
   function getCurrent() {
     const fmt = _resolve(_currentName) || PRESETS['A4'];
     let { width, height } = fmt;
     if (_isLandscape) [width, height] = [height, width];
-    return { name: _currentName, width, height, landscape: _isLandscape };
+    return {
+      name: _currentName,
+      width: Math.round(width * 10) / 10,
+      height: Math.round(height * 10) / 10,
+      landscape: _isLandscape
+    };
   }
 
   /**
@@ -223,10 +258,23 @@ const PageFormats = (() => {
     return `${name} · ${fmt.width}×${fmt.height}mm`;
   }
 
+  /**
+   * Define o formato e a orientação simultaneamente (usado na troca de abas/projetos).
+   */
+  function setFormatAndOrientation(name, isLandscape = false) {
+    _isLandscape = !!isLandscape;
+    localStorage.setItem(KEYS.LANDSCAPE, _isLandscape);
+    applyFormat(name || 'A4', true);
+    const btn = document.getElementById('orientation-btn');
+    if (btn) btn.classList.toggle('landscape', _isLandscape);
+  }
+
   /* ── Expõe a API ── */
   return {
     init,
     applyFormat,
+    applyCustom,
+    setFormatAndOrientation,
     previewCustom,
     saveAndApplyCustom,
     deleteCustomFormat,

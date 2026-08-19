@@ -20,31 +20,20 @@ const Exporter = (() => {
      OBTER CONTEÚDO HTML DO DOCUMENTO (Multi-Estratégia)
   ══════════════════════════════════════════════════════════ */
   function getDocumentHtml() {
-    // 1. Tenta dados oficiais do CKEditor
-    let html = window.EditorApp?.getData() || '';
-    if (html && html.trim() && html !== '<p>&nbsp;</p>' && html !== '<p></p>') {
-      return html;
-    }
-
-    // 2. Tenta capturar o container editável do CKEditor
-    const ckEditable = document.querySelector('.ck-editor__editable');
-    if (ckEditable && ckEditable.innerHTML && ckEditable.innerHTML.trim()) {
-      return ckEditable.innerHTML;
-    }
-
-    // 3. Tenta o elemento #editor
-    const editorEl = document.getElementById('editor');
-    if (editorEl && editorEl.innerHTML && editorEl.innerHTML.trim()) {
-      return editorEl.innerHTML;
-    }
-
-    // 4. Tenta o elemento da folha #page-sheet
     const sheet = document.getElementById('page-sheet');
-    if (sheet && sheet.innerHTML) {
-      return sheet.innerHTML;
+    const editor = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+
+    if (!sheet) {
+      return editor ? editor.innerHTML : (window.EditorApp?.getData() || '');
     }
 
-    return '';
+    // Clona o page-sheet para capturar fielmente texto e imagens livres
+    const clone = sheet.cloneNode(true);
+
+    // Remove overlays de controle de UI (resizer, drop indicators)
+    clone.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle').forEach(el => el.remove());
+
+    return clone.innerHTML;
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -66,21 +55,30 @@ const Exporter = (() => {
     const docName = document.getElementById('doc-name-input')?.value?.trim() || 'documento';
     const btn     = document.getElementById(`export-${format}-btn`);
 
+    const safeDoc = _sanitize(docName);
+    const safeFmt = _sanitize(fmt.name);
+    const timeStr = _timestamp();
+
     _setLoading(btn, true);
 
     try {
       const payload = {
         html,
         format,
-        pageWidth:  fmt.width,
-        pageHeight: fmt.height,
-        landscape:  fmt.landscape,
-        formatName: fmt.name,
+        pageWidth:      fmt.width,
+        pageHeight:     fmt.height,
+        page_width_mm:  fmt.width,
+        page_height_mm: fmt.height,
+        landscape:      fmt.landscape,
+        formatName:     fmt.name,
+        format_name:    fmt.name,
         docName,
+        doc_name:       docName,
       };
 
       // 1. DOCX (com fallback inteligente caso o serviço Python não esteja rodando)
       if (format === 'docx') {
+        const filename = `${safeDoc}_${safeFmt}_${timeStr}.docx`;
         try {
           const res = await fetch(ENDPOINTS.docx, {
             method:  'POST',
@@ -89,14 +87,15 @@ const Exporter = (() => {
           });
 
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const blob = await res.blob();
-          _downloadBlob(blob, `${_sanitize(docName)}_${fmt.name}_${_timestamp()}.docx`);
+          const arrayBuf = await res.arrayBuffer();
+          const blob = new Blob([arrayBuf], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+          _downloadBlob(blob, filename, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
           _toast('✅ DOCX (Word) exportado com sucesso!', 'success');
           return;
 
         } catch (docxErr) {
           console.warn('[Exporter] Serviço Python DOCX offline. Usando gerador HTML-DOCX integrado.');
-          _exportHtmlDocx(html, docName, fmt);
+          _exportHtmlDocx(html, docName, fmt, `${safeDoc}_${safeFmt}_${timeStr}.doc`);
           _toast('✅ Documento DOCX gerado e baixado!', 'success');
           return;
         }
@@ -114,9 +113,14 @@ const Exporter = (() => {
         throw new Error(errText || `Erro ${res.status}`);
       }
 
-      const blob = await res.blob();
-      const ext  = format === 'png' ? 'png' : 'pdf';
-      _downloadBlob(blob, `${_sanitize(docName)}_${fmt.name}_${_timestamp()}.${ext}`);
+      const arrayBuf = await res.arrayBuffer();
+      const isPng    = format === 'png';
+      const ext      = isPng ? 'png' : 'pdf';
+      const mimeType = isPng ? 'image/png' : 'application/pdf';
+      const filename = `${safeDoc}_${safeFmt}_${timeStr}.${ext}`;
+
+      const typedBlob = new Blob([arrayBuf], { type: mimeType });
+      _downloadBlob(typedBlob, filename, mimeType);
 
       _toast(`✅ ${format.toUpperCase()} exportado com sucesso!`, 'success');
 
@@ -131,36 +135,75 @@ const Exporter = (() => {
   /* ──────────────────────────────────────────────────────────
      Fallback de DOCX nativo do navegador (Office HTML Word)
   ────────────────────────────────────────────────────────── */
-  function _exportHtmlDocx(html, docName, fmt) {
+  function _exportHtmlDocx(html, docName, fmt, targetFilename) {
+    const padV = Math.min(25, Math.max(4, Math.round(fmt.height * 0.08)));
+    const padH = Math.min(20, Math.max(4, Math.round(fmt.width * 0.08)));
+    const filename = targetFilename || `${_sanitize(docName)}_${_sanitize(fmt.name)}_${_timestamp()}.doc`;
+
     const header = `<!DOCTYPE html><html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
 <head><meta charset='utf-8'><title>${docName}</title>
+<!--[if gte mso 9]>
+<xml>
+  <w:WordDocument>
+    <w:View>Print</w:View>
+    <w:Zoom>100</w:Zoom>
+    <w:DoNotOptimizeForBrowser/>
+  </w:WordDocument>
+</xml>
+<![endif]-->
 <style>
-  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 25mm 20mm; }
-  body { font-family: 'Merriweather', 'Times New Roman', serif; font-size: 11pt; line-height: 1.6; color: #111111; }
+  @page {
+    size: ${fmt.width}mm ${fmt.height}mm;
+    margin: ${padV}mm ${padH}mm ${padV}mm ${padH}mm;
+  }
+  @page Section1 {
+    size: ${fmt.width}mm ${fmt.height}mm;
+    mso-page-orientation: ${fmt.landscape ? 'landscape' : 'portrait'};
+    margin: ${padV}mm ${padH}mm ${padV}mm ${padH}mm;
+    mso-header-margin: 10mm;
+    mso-footer-margin: 10mm;
+    mso-paper-source: 0;
+  }
+  div.Section1 {
+    page: Section1;
+  }
+  body {
+    font-family: 'Merriweather', 'Times New Roman', serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #111111;
+  }
   h1 { font-family: Arial, sans-serif; font-size: 24pt; font-weight: bold; margin-bottom: 12pt; }
   h2 { font-family: Arial, sans-serif; font-size: 18pt; font-weight: bold; margin-top: 14pt; margin-bottom: 6pt; }
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #333; padding: 6pt; }
   img { max-width: 100%; height: auto; }
 </style>
-</head><body>${html}</body></html>`;
+</head><body><div class="Section1">${html}</div></body></html>`;
 
     const blob = new Blob(['\ufeff' + header], { type: 'application/msword' });
-    _downloadBlob(blob, `${_sanitize(docName)}_${fmt.name}_${_timestamp()}.doc`);
+    _downloadBlob(blob, filename, 'application/msword');
   }
 
   /* ──────────────────────────────────────────────────────────
-     Helpers de Download e Loading
+     Helpers de Download e Sanitização de Nomes de Arquivo
   ────────────────────────────────────────────────────────── */
-  function _downloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
+  function _downloadBlob(blob, filename, mimeType) {
+    const finalBlob = (mimeType && blob.type !== mimeType)
+      ? new Blob([blob], { type: mimeType })
+      : blob;
+
+    const url = URL.createObjectURL(finalBlob);
+    const a   = document.createElement('a');
+    a.style.display = 'none';
+    a.href     = url;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => {
       a.remove();
       URL.revokeObjectURL(url);
-    }, 15_000);
+    }, 20_000);
   }
 
   function _setLoading(btn, loading) {
@@ -176,12 +219,15 @@ const Exporter = (() => {
   }
 
   function _sanitize(name) {
-    return (name || 'documento')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9\-_\s]/gi, '')
-      .replace(/\s+/g, '_')
-      .toLowerCase()
-      .substring(0, 50) || 'documento';
+    if (!name) return 'documento';
+    return String(name)
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x') // Converte caracteres de multiplicação proibidos pelo Windows para 'x'
+      .replace(/[^a-zA-Z0-9_\-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_|_$/g, '')
+      .substring(0, 40) || 'documento';
   }
 
   function _timestamp() {

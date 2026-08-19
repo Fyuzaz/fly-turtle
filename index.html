@@ -9,14 +9,15 @@
   <!-- Google Fonts (preconnect para performance) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap" rel="stylesheet" />
 
   <!-- CKEditor 5 Superbuild -->
   <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/super-build/ckeditor.js"></script>
 
   <!-- Estilos -->
-  <link rel="stylesheet" href="css/theme.css" />
-  <link rel="stylesheet" href="css/editor.css" />
-  <link rel="stylesheet" href="css/media-library.css" />
+  <link rel="stylesheet" href="css/theme.css?v=2.2" />
+  <link rel="stylesheet" href="css/editor.css?v=2.2" />
+  <link rel="stylesheet" href="css/media-library.css?v=2.2" />
 </head>
 <body>
 
@@ -113,6 +114,49 @@
   <!-- ─── TOOLBAR (CKEditor monta aqui) ────────────────── -->
   <div id="toolbar-bar" role="toolbar" aria-label="Barra de formatação"></div>
 
+  <!-- ─── DROPDOWN POPOVER DE LINK (Vintage Underground Comix) ── -->
+  <div id="toolbar-link-popover" class="toolbar-link-popover hidden" role="dialog" aria-label="Inserir Hiperlink">
+    <div class="popover-header">
+      <span>🔗 Inserir Hiperlink</span>
+      <button type="button" class="popover-close" onclick="EditorApp.closeLinkDropdown()" aria-label="Fechar">✕</button>
+    </div>
+    <div class="popover-body">
+      <div class="popover-row">
+        <label for="popover-link-text">Texto:</label>
+        <input type="text" id="popover-link-text" placeholder="Texto visível..." />
+      </div>
+      <div class="popover-row">
+        <label for="popover-link-url">URL:</label>
+        <input type="url" id="popover-link-url" placeholder="https://exemplo.com" />
+      </div>
+      <div class="popover-footer">
+        <label class="popover-blank-lbl">
+          <input type="checkbox" id="popover-link-blank" checked /> Nova aba
+        </label>
+        <div style="display:flex; gap:6px; margin-left:auto;">
+          <button type="button" id="popover-link-remove" class="btn-popover danger" style="display:none;" onclick="EditorApp.removeCurrentLink()">🗑 Remover</button>
+          <button type="button" class="btn-popover primary" onclick="EditorApp.applyLinkFromDropdown()">✓ Aplicar</button>
+        </div>
+      </div>
+    </div>
+  </div><!-- /toolbar-link-popover -->
+
+  <!-- ─── FLOATING LINK PREVIEW BALLOON (Abrir / Copiar / Editar / Excluir) ── -->
+  <div id="link-preview-balloon" class="link-preview-balloon hidden" role="tooltip">
+    <div class="balloon-content">
+      <a id="balloon-link-href" href="#" target="_blank" rel="noopener noreferrer" class="balloon-url" title="Clique para abrir o link em nova aba">
+        <span class="balloon-icon">🌐</span>
+        <span id="balloon-link-text" class="balloon-text">https://...</span>
+        <span class="balloon-ext">↗</span>
+      </a>
+      <div class="balloon-actions">
+        <button type="button" class="balloon-btn" onclick="EditorApp.copyActiveLink()" title="Copiar Link">📋 Copiar</button>
+        <button type="button" class="balloon-btn" onclick="EditorApp.editActiveLink()" title="Editar Link">✏️ Editar</button>
+        <button type="button" class="balloon-btn danger" onclick="EditorApp.removeActiveLink()" title="Remover Link">🗑️</button>
+      </div>
+    </div>
+  </div><!-- /link-preview-balloon -->
+
 
   <!-- ─── ÁREA PRINCIPAL ───────────────────────────────── -->
   <div id="main-area">
@@ -130,82 +174,123 @@
 
     <!-- ─── GAVETA DE MÍDIA ───────────────────────────── -->
     <aside id="media-drawer" aria-label="Biblioteca de Mídia">
+      <!-- Alça de Redimensionamento Interativo (Arrastar para Expandir) -->
+      <div id="media-drawer-resizer" class="drawer-resizer" title="Arraste para redimensionar a largura da biblioteca"></div>
 
       <div class="drawer-header">
         <div class="drawer-title">🗂️ Biblioteca de Mídia</div>
-        <button class="drawer-close-btn"
-                title="Fechar gaveta"
-                onclick="MediaLibrary.closeDrawer()">✕</button>
-      </div>
-
-      <!-- Busca -->
-      <div class="drawer-search">
-        <div class="search-input-wrap">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-          </svg>
-          <input id="media-search-input"
-                 type="text"
-                 placeholder="Buscar arquivos..."
-                 aria-label="Buscar na biblioteca de mídia" />
+        <div class="drawer-header-actions">
+          <!-- Presets de Largura -->
+          <div class="drawer-size-presets" title="Ajustar tamanho da biblioteca">
+            <button type="button" class="drawer-size-btn" data-width="320" title="Modo Compacto (320px)" onclick="MediaLibrary.setDrawerWidth(320)">📱</button>
+            <button type="button" class="drawer-size-btn" data-width="540" title="Modo Médio (540px)" onclick="MediaLibrary.setDrawerWidth(540)">💻</button>
+            <button type="button" class="drawer-size-btn" data-width="780" title="Modo Estúdio Amplo (780px)" onclick="MediaLibrary.setDrawerWidth(780)">🖥️</button>
+            <button type="button" class="drawer-size-btn" data-width="fullscreen" title="Modo Expandido / Tela Cheia" onclick="MediaLibrary.toggleFullscreen()">⛶</button>
+          </div>
+          <button class="drawer-close-btn"
+                  title="Fechar gaveta"
+                  onclick="MediaLibrary.closeDrawer()">✕</button>
         </div>
       </div>
 
-      <div class="drawer-body">
+      <!-- Container do Corpo (Flexível com suporte a Modo Explorer 2 Colunas) -->
+      <div class="drawer-body-container">
 
-        <!-- Pastas -->
-        <div class="folder-panel">
-          <div class="folder-panel-header">
-            <span class="folder-panel-title">Pastas</span>
-            <button class="folder-add-btn"
-                    title="Criar nova pasta"
-                    onclick="MediaLibrary.showCreateFolderInput()">＋</button>
+        <!-- Coluna Lateral (Pastas & Upload) -->
+        <div class="drawer-sidebar-pane">
+          <!-- Pastas -->
+          <div class="folder-panel" id="folder-panel">
+            <div class="folder-panel-header">
+              <span class="folder-panel-title">Pastas</span>
+              <div class="folder-header-btns">
+                <button class="folder-toggle-btn" id="folder-toggle-btn" title="Recolher / Expandir Pastas" onclick="MediaLibrary.toggleFoldersCollapse()">▲</button>
+                <button class="folder-add-btn"
+                        title="Criar nova pasta"
+                        onclick="MediaLibrary.showCreateFolderInput()">＋</button>
+              </div>
+            </div>
+            <ul id="folder-list" class="folder-list" role="listbox" aria-label="Pastas da biblioteca"></ul>
           </div>
-          <ul id="folder-list" class="folder-list" role="listbox" aria-label="Pastas da biblioteca"></ul>
-        </div>
 
-        <!-- Zona de upload -->
-        <div id="upload-zone" class="upload-zone" role="button" tabindex="0"
-             aria-label="Clique ou arraste arquivos para fazer upload no servidor">
-          <input type="file" id="media-file-input" style="display: none;" multiple accept="image/*,video/*" />
-          <div class="upload-zone-icon">☁️</div>
-          <div class="upload-zone-text">
-            <strong>Clique ou arraste</strong> para enviar<br/>
-            <span class="upload-zone-hint">Imagens (PNG, JPG, WebP, SVG) ou Vídeos (MP4)</span>
+          <!-- Zona de upload -->
+          <div id="upload-zone" class="upload-zone" role="button" tabindex="0"
+               aria-label="Clique ou arraste arquivos para fazer upload no servidor">
+            <input type="file" id="media-file-input" onchange="MediaLibrary.handleFileSelect(event)" style="position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none;" multiple accept="image/*,video/*,.jfif,.heic,.avif,.webp,.svg,.png,.jpg,.jpeg" />
+            <div class="upload-zone-icon">☁️</div>
+            <div class="upload-zone-text">
+              <strong>Clique ou arraste</strong> para enviar<br/>
+              <span class="upload-zone-hint">Imagens ou Vídeos</span>
+            </div>
+            <label for="media-file-input" class="btn btn-primary upload-picker-btn" style="margin-top: 6px; font-size: 0.75rem; padding: 5px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+              📁 Escolher do Computador
+            </label>
+            <div class="upload-progress" id="upload-progress">
+              <div class="upload-progress-bar" id="upload-progress-bar"></div>
+            </div>
           </div>
-          <button type="button" class="btn btn-primary" style="margin-top: 6px; font-size: 0.75rem; padding: 4px 10px;"
-                  onclick="event.stopPropagation(); MediaLibrary.triggerFileInput();">
-            📁 Escolher do Computador
-          </button>
-          <div class="upload-progress" id="upload-progress">
-            <div class="upload-progress-bar" id="upload-progress-bar"></div>
-          </div>
-        </div>
+        </div><!-- /drawer-sidebar-pane -->
 
-        <!-- Grid de arquivos -->
-        <div class="files-section">
-          <div class="files-section-header">
-            <span class="files-section-title">Arquivos</span>
-            <span class="files-count" id="files-count"></span>
+        <!-- Coluna Principal (Busca + Alternador de Visualização + Grid/Lista de Arquivos) -->
+        <div class="drawer-content-pane">
+          <!-- Busca -->
+          <div class="drawer-search">
+            <div class="search-input-wrap">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input id="media-search-input"
+                     type="text"
+                     placeholder="Buscar arquivos nesta pasta..."
+                     aria-label="Buscar na biblioteca de mídia" />
+            </div>
           </div>
-          <div class="files-grid" id="files-grid" role="list" aria-label="Arquivos da pasta"></div>
-        </div>
 
-      </div><!-- /drawer-body -->
+          <!-- Seção de Arquivos com Alternador de Visualização -->
+          <div class="files-section">
+            <div class="files-section-header">
+              <div class="files-header-left">
+                <span class="files-section-title">Arquivos</span>
+                <span class="files-count" id="files-count"></span>
+              </div>
+              <div class="view-mode-group" title="Modo de Visualização">
+                <button type="button" class="view-mode-btn" data-view="grid-lg" title="Miniaturas Grandes" onclick="MediaLibrary.setViewMode('grid-lg')">🔲 Grande</button>
+                <button type="button" class="view-mode-btn active" data-view="grid-md" title="Grade Média (Padrão)" onclick="MediaLibrary.setViewMode('grid-md')">▦ Média</button>
+                <button type="button" class="view-mode-btn" data-view="grid-sm" title="Grade Compacta" onclick="MediaLibrary.setViewMode('grid-sm')">▩ Compacta</button>
+                <button type="button" class="view-mode-btn" data-view="list" title="Modo Lista com Nomes" onclick="MediaLibrary.setViewMode('list')">☰ Lista</button>
+              </div>
+            </div>
+            <div class="files-grid view-grid-md" id="files-grid" role="list" aria-label="Arquivos da pasta"></div>
+          </div>
+        </div><!-- /drawer-content-pane -->
+
+      </div><!-- /drawer-body-container -->
     </aside><!-- /media-drawer -->
 
   </div><!-- /main-area -->
 
 
-  <!-- ─── STATUS BAR ───────────────────────────────────── -->
-  <footer id="status-bar" aria-label="Barra de status">
-    <div class="status-group">
-      <span class="status-item" id="word-count">0 palavras</span>
-      <span class="status-item" id="char-count">0 char</span>
+  <!-- ─── FOOTER CONTAINER (Abas de Projetos + Status Bar) ── -->
+  <footer id="app-footer" aria-label="Rodapé e Abas de Projetos">
+    <!-- Barra de Abas de Projetos -->
+    <div id="project-tabs-bar" role="tablist" aria-label="Projetos Abertos">
+      <div id="project-tabs-list" class="project-tabs-list">
+        <!-- Renderizado dinamicamente pelo ProjectsManager -->
+      </div>
+      <button type="button" id="add-project-tab-btn" class="add-project-tab-btn" title="Criar Novo Projeto (+)">
+        <span>＋</span> Nova Aba
+      </button>
     </div>
-    <div class="status-group">
-      <span class="status-item" id="page-dimensions">210 × 297 mm</span>
-      <span class="status-item" id="save-indicator">Pronto</span>
+
+    <!-- Status Bar -->
+    <div id="status-bar" aria-label="Barra de status">
+      <div class="status-group">
+        <span class="status-item" id="word-count">0 palavras</span>
+        <span class="status-item" id="char-count">0 char</span>
+      </div>
+      <div class="status-group">
+        <span class="status-item" id="page-dimensions">210 × 297 mm</span>
+        <span class="status-item" id="save-indicator">Pronto</span>
+      </div>
     </div>
   </footer>
 
@@ -260,6 +345,41 @@
   </div>
 </div><!-- /custom-size-modal -->
 
+<!-- ═══════════════════════════════════════════════════════
+     MODAL — INSERIR / EDITAR HIPERLINK (Vintage Comix Edition)
+════════════════════════════════════════════════════════ -->
+<div id="link-modal" class="modal-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="link-modal-title">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="link-modal-title">🔗 Inserir Hiperlink</h3>
+      <button class="modal-close-btn" onclick="EditorApp.closeLinkModal()" aria-label="Fechar">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <label for="link-text-input">Texto de exibição</label>
+      <input id="link-text-input" type="text" placeholder="Texto visível no documento..." maxlength="100" />
+
+      <label for="link-url-input" style="margin-top: 10px;">Endereço da Web (URL)</label>
+      <input id="link-url-input" type="url" placeholder="https://exemplo.com" />
+
+      <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="link-target-blank" checked style="width:16px; height:16px; accent-color: var(--burnt-orange);" />
+        <label for="link-target-blank" style="margin-top:0; font-size:12px; font-weight:600; cursor:pointer;">
+          Abrir link em nova aba (_blank)
+        </label>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="EditorApp.closeLinkModal()">Cancelar</button>
+      <button id="link-remove-btn" class="btn" style="background:#C0392B; color:#fff; display:none;" onclick="EditorApp.removeCurrentLink()">🗑 Remover</button>
+      <button class="btn btn-primary" onclick="EditorApp.applyLink()">Inserir Link</button>
+    </div>
+  </div>
+</div><!-- /link-modal -->
+
+
 
 <!-- ─── Toast Container ───────────────────────────────── -->
 <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
@@ -268,12 +388,13 @@
 <!-- ═══════════════════════════════════════════════════════
      SCRIPTS
 ════════════════════════════════════════════════════════ -->
-<script src="js/page-formats.js"></script>
-<script src="js/media-library.js"></script>
-<script src="js/upload-adapter.js"></script>
-<script src="js/image-resizer.js"></script>
-<script src="js/export.js"></script>
-<script src="js/editor.js"></script>
+<script src="js/page-formats.js?v=2.2"></script>
+<script src="js/projects-manager.js?v=2.2"></script>
+<script src="js/media-library.js?v=2.2"></script>
+<script src="js/upload-adapter.js?v=2.2"></script>
+<script src="js/image-resizer.js?v=2.2"></script>
+<script src="js/export.js?v=2.2"></script>
+<script src="js/editor.js?v=2.2"></script>
 
 <script>
 /* ══════════════════════════════════════════════════════════
@@ -283,12 +404,26 @@ const App = (() => {
 
   /* ── Inicialização ─────────────────────────────────────── */
   async function init() {
+    // 1. Inicia o gerenciador de projetos (carrega/migra abas e obtém projeto ativo)
+    const activeProj = ProjectsManager.init();
+
+    // 2. Inicia formatos de página e sincroniza com o projeto ativo
     PageFormats.init();
+    if (activeProj) {
+      PageFormats.setFormatAndOrientation(activeProj.format || 'A4', !!activeProj.landscape);
+      const nameInput = document.getElementById('doc-name-input');
+      if (nameInput) nameInput.value = activeProj.name || 'Novo Documento';
+      document.title = `${activeProj.name || 'Documento'} — WebDoc`;
+    }
+
     _buildFormatSelector();
     _updateFormatChip(PageFormats.getCurrent());
 
-    // Inicia o editor
+    // 3. Inicia o editor (CKEditor 5)
     await EditorApp.init();
+
+    // 4. Inicia a biblioteca de mídia
+    MediaLibrary.init(EditorApp.getInstance());
 
     // Escuta mudanças de formato
     window.addEventListener('pageFormatChanged',   e => _updateFormatChip(e.detail));
@@ -368,6 +503,10 @@ const App = (() => {
       return;
     }
     PageFormats.applyFormat(value);
+    if (window.ProjectsManager) {
+      window.ProjectsManager.saveCurrentState();
+      window.ProjectsManager.renderTabs();
+    }
   }
 
   /* ── Orientação ────────────────────────────────────────── */
@@ -376,6 +515,10 @@ const App = (() => {
     const btn = document.getElementById('orientation-btn');
     if (btn) btn.classList.toggle('landscape', isLandscape);
     btn?.setAttribute('title', isLandscape ? 'Orientação: Paisagem (clique para Retrato)' : 'Orientação: Retrato (clique para Paisagem)');
+    if (window.ProjectsManager) {
+      window.ProjectsManager.saveCurrentState();
+      window.ProjectsManager.renderTabs();
+    }
   }
 
   /* ── Chip de formato ───────────────────────────────────── */
@@ -441,20 +584,13 @@ const App = (() => {
     const name = document.getElementById('custom-format-name')?.value?.trim();
 
     try {
-      if (name) {
-        PageFormats.saveAndApplyCustom(name, w, h, u);
-        _buildFormatSelector();
-        showToast(`Formato "${name}" salvo!`, 'success');
-      } else {
-        PageFormats.previewCustom(w, h, u);
-        // Gera um nome descritivo
-        const wMm = Math.round(PageFormats.toMm(w, u));
-        const hMm = Math.round(PageFormats.toMm(h, u));
-        window.dispatchEvent(new CustomEvent('pageFormatChanged', {
-          detail: { name: `${wMm}×${hMm}mm`, width: wMm, height: hMm, landscape: false }
-        }));
-        showToast('Tamanho aplicado!', 'success');
+      const res = PageFormats.applyCustom(w, h, u, name);
+      _buildFormatSelector();
+      if (window.ProjectsManager) {
+        window.ProjectsManager.saveCurrentState();
+        window.ProjectsManager.renderTabs();
       }
+      showToast(name ? `Formato "${name}" salvo e aplicado!` : `Tamanho ${res.name} aplicado!`, 'success');
       closeCustomModal();
     } catch (err) {
       showToast(err.message, 'error');
@@ -464,11 +600,15 @@ const App = (() => {
   /* ── Fechar modal clicando fora ────────────────────────── */
   document.addEventListener('click', e => {
     if (e.target.id === 'custom-size-modal') closeCustomModal();
+    if (e.target.id === 'link-modal') EditorApp?.closeLinkModal?.();
   });
 
   /* ── Atalhos de teclado ────────────────────────────────── */
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeCustomModal();
+    if (e.key === 'Escape') {
+      closeCustomModal();
+      EditorApp?.closeLinkModal?.();
+    }
   });
 
   return { init, onFormatChange, toggleOrientation, openCustomModal, closeCustomModal, previewCustom, onCustomUnitChange, applyCustomSize };

@@ -1,7 +1,7 @@
 /**
  * image-resizer.js
  * Sistema Avançado de Mídia: Move Tool, Controle de Camadas (Z-Index / Frente & Trás),
- * Drag and Scale Interativo & Confinamento Estrito dentro da Folha do Documento
+ * Exclusão Precisa via Teclado (Delete / Backspace), Drag & Scale Interativo & Confinamento Estrito
  * "The Midnight Bat-Tortoise" Edition
  */
 
@@ -69,7 +69,7 @@ const ImageResizer = (() => {
         <button type="button" class="resizer-btn" data-action="align-right" title="Alinhar à Direita">➡</button>
         <button type="button" class="resizer-btn" data-action="size-50" title="50% da largura">50%</button>
         <button type="button" class="resizer-btn" data-action="size-100" title="Largura Total">100%</button>
-        <button type="button" class="resizer-btn danger" data-action="delete" title="Excluir Imagem">🗑</button>
+        <button type="button" class="resizer-btn danger" data-action="delete" title="Excluir Imagem (ou aperte Delete no teclado)">🗑</button>
       </div>
 
       <!-- Badge de tamanho, camada e modo -->
@@ -128,16 +128,29 @@ const ImageResizer = (() => {
     window.addEventListener('mousemove', _onMouseMove);
     window.addEventListener('mouseup', _onMouseUp);
 
-    // Teclado (Delete / Esc)
+    // Intercepta arrasto nativo do navegador para impedir que estilos sejam apagados
+    document.addEventListener('dragstart', e => {
+      const img = e.target.closest('#workspace img, #page-sheet img, .ck-content img');
+      if (img && !img.closest('#media-drawer')) {
+        e.preventDefault();
+        selectImage(img);
+        _onMoveHandleMouseDown(e);
+      }
+    });
+
+    // Teclado (Delete / Backspace / Esc) - Captura em fase primária para impedir exclusão de caracteres
     window.addEventListener('keydown', e => {
       if (_activeImg) {
-        if ((e.key === 'Delete' || e.key === 'Backspace') && document.activeElement === document.body) {
+        const isInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+        if ((e.key === 'Delete' || e.key === 'Backspace') && !isInput) {
+          e.preventDefault();
+          e.stopPropagation();
           _deleteActiveImage();
         } else if (e.key === 'Escape') {
           hideOverlay();
         }
       }
-    });
+    }, true);
   }
 
   /* ──────────────────────────────────────────────────────────
@@ -147,8 +160,23 @@ const ImageResizer = (() => {
     if (!img) return;
     _activeImg = img;
 
-    _activeImg.style.maxWidth = '100%';
-    _activeImg.style.boxSizing = 'border-box';
+    // Trava as dimensões atuais em pixels fixos para impedir redimensionamento involuntário
+    const rect = img.getBoundingClientRect();
+    const fixedW = Math.round(rect.width);
+    if (fixedW > 0) {
+      _activeImg.style.width     = `${fixedW}px`;
+      _activeImg.style.height    = 'auto';
+      _activeImg.style.maxWidth  = '100%';
+      _activeImg.style.boxSizing = 'border-box';
+      _activeImg.setAttribute('draggable', 'false');
+
+      const targetEl = _activeImg.closest('figure.image') || _activeImg;
+      if (targetEl !== _activeImg) {
+        targetEl.style.width  = `${fixedW}px`;
+        targetEl.style.height = 'auto';
+      }
+    }
+
     _aspectRatio = _imgNaturalRatio(img) || 1;
 
     _updateModeButtonText();
@@ -260,14 +288,32 @@ const ImageResizer = (() => {
     e.preventDefault();
     e.stopPropagation();
 
+    const targetEl = _activeImg.closest('figure.image') || _activeImg;
+    const sheet    = document.getElementById('page-sheet');
+    sheet.style.position = 'relative';
+
+    // Se estiver em modo texto mas o usuário clicou para arrastar livremente, ativa modo livre automático
+    if (!_isFreeFloating(_activeImg)) {
+      _enableFreeMode(targetEl, sheet);
+    }
+
     _isMoving = true;
     _startX   = e.clientX;
     _startY   = e.clientY;
 
-    const targetEl  = _activeImg.closest('figure.image') || _activeImg;
-    const sheet     = document.getElementById('page-sheet');
     const sheetRect = sheet.getBoundingClientRect();
     const elRect    = targetEl.getBoundingClientRect();
+
+    // Garante que o tamanho em pixels esteja 100% blindado antes do início do movimento
+    const currentW = Math.round(elRect.width || _activeImg.getBoundingClientRect().width);
+    if (currentW > 0) {
+      _activeImg.style.width  = `${currentW}px`;
+      _activeImg.style.height = 'auto';
+      if (targetEl !== _activeImg) {
+        targetEl.style.width  = `${currentW}px`;
+        targetEl.style.height = 'auto';
+      }
+    }
 
     _startLeft = elRect.left - sheetRect.left;
     _startTop  = elRect.top - sheetRect.top;
@@ -423,6 +469,18 @@ const ImageResizer = (() => {
         } else {
           _dropTarget.parentNode.insertBefore(targetEl, _dropTarget.nextSibling);
         }
+
+        // Mantém as dimensões fixadas e sincroniza autossalvamento
+        const currentW = Math.round(targetEl.getBoundingClientRect().width || _activeImg.getBoundingClientRect().width);
+        if (currentW > 0) {
+          _activeImg.style.width  = `${currentW}px`;
+          _activeImg.style.height = 'auto';
+          if (targetEl !== _activeImg) {
+            targetEl.style.width  = `${currentW}px`;
+            targetEl.style.height = 'auto';
+          }
+        }
+        document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
         window.showToast?.('Imagem reposicionada no texto!', 'success');
       }
 
@@ -492,14 +550,57 @@ const ImageResizer = (() => {
   /* ──────────────────────────────────────────────────────────
      Alterna entre Modo Livre e Modo No Texto
   ────────────────────────────────────────────────────────── */
+  function _enableFreeMode(targetEl, sheet) {
+    const sheetRect  = sheet.getBoundingClientRect();
+    const targetRect = targetEl.getBoundingClientRect();
+
+    let left = targetRect.left - sheetRect.left;
+    let top  = targetRect.top - sheetRect.top;
+
+    sheet.style.position = 'relative';
+
+    const maxLeft = Math.max(0, sheet.clientWidth - targetRect.width);
+    const maxTop  = Math.max(0, sheet.clientHeight - targetRect.height);
+
+    left = Math.max(0, Math.min(left, maxLeft));
+    top  = Math.max(0, Math.min(top, maxTop));
+
+    // Desacopla do fluxo do parágrafo: anexa diretamente à folha para ter eixo 100% independente
+    if (targetEl.parentNode !== sheet) {
+      sheet.appendChild(targetEl);
+    }
+
+    targetEl.style.position = 'absolute';
+    targetEl.style.left     = `${Math.round(left)}px`;
+    targetEl.style.top      = `${Math.round(top)}px`;
+    targetEl.style.zIndex   = targetEl.style.zIndex || '10';
+    targetEl.style.float    = 'none';
+    targetEl.style.margin   = '0';
+
+    _updateModeButtonText();
+  }
+
   function _toggleFreeFloating() {
     if (!_activeImg) return;
     const targetEl = _activeImg.closest('figure.image') || _activeImg;
     const sheet    = document.getElementById('page-sheet');
     const isFree   = _isFreeFloating(_activeImg);
 
+    const currentW = Math.round(targetEl.getBoundingClientRect().width || _activeImg.getBoundingClientRect().width);
+    if (currentW > 0) {
+      _activeImg.style.width  = `${currentW}px`;
+      _activeImg.style.height = 'auto';
+      targetEl.style.width    = `${currentW}px`;
+      targetEl.style.height   = 'auto';
+    }
+
     if (isFree) {
-      // Volta para o fluxo do texto
+      // Volta para o fluxo do texto dentro do editor
+      const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+      if (editorEl && targetEl.parentNode !== editorEl) {
+        editorEl.appendChild(targetEl);
+      }
+
       targetEl.style.position = '';
       targetEl.style.left     = '';
       targetEl.style.top      = '';
@@ -507,31 +608,12 @@ const ImageResizer = (() => {
       _applyAlignment('center');
       window.showToast?.('Modo de fluxo de texto ativado', 'info');
     } else {
-      // Ativa modo livre absoluto dentro da folha
-      const sheetRect  = sheet.getBoundingClientRect();
-      const targetRect = targetEl.getBoundingClientRect();
-
-      let left = targetRect.left - sheetRect.left;
-      let top  = targetRect.top - sheetRect.top;
-
-      sheet.style.position = 'relative';
-
-      const maxLeft = Math.max(0, sheet.clientWidth - targetRect.width);
-      const maxTop  = Math.max(0, sheet.clientHeight - targetRect.height);
-
-      left = Math.max(0, Math.min(left, maxLeft));
-      top  = Math.max(0, Math.min(top, maxTop));
-
-      targetEl.style.position = 'absolute';
-      targetEl.style.left     = `${Math.round(left)}px`;
-      targetEl.style.top      = `${Math.round(top)}px`;
-      targetEl.style.zIndex   = '10';
-      targetEl.style.float    = 'none';
-      targetEl.style.margin   = '0';
-
-      window.showToast?.('Modo Livre ativado! Ajuste posição e camadas livremente.', 'success');
+      // Ativa modo livre absoluto e desacoplado
+      _enableFreeMode(targetEl, sheet);
+      window.showToast?.('Modo Livre ativado! Eixo 100% independente.', 'success');
     }
 
+    document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
     _updateModeButtonText();
     setTimeout(_updateOverlayPosition, 50);
   }
@@ -584,7 +666,6 @@ const ImageResizer = (() => {
       if (!parent) return;
       const next = targetEl.nextElementSibling;
       if (next) {
-        // Insere DEPOIS do elemento seguinte
         parent.insertBefore(targetEl, next.nextSibling);
         window.showToast?.('Imagem movida para baixo no texto', 'info');
       }
@@ -624,15 +705,32 @@ const ImageResizer = (() => {
     }
   }
 
+  /* ──────────────────────────────────────────────────────────
+     EXCLUIR IMAGEM SELECIONADA
+  ────────────────────────────────────────────────────────── */
   function _deleteActiveImage() {
     if (!_activeImg) return;
     const toRemove = _activeImg.closest('figure.image') || _activeImg;
+
+    // Se CKEditor estiver gerenciando o elemento, sincroniza remoção no Model
+    const editor = window.EditorApp?.getInstance();
+    if (editor && editor.model) {
+      try {
+        const modelElement = editor.editing?.mapper?.toModelElement(toRemove);
+        if (modelElement) {
+          editor.model.change(writer => {
+            writer.remove(modelElement);
+          });
+        }
+      } catch {}
+    }
+
     toRemove.remove();
     hideOverlay();
-    window.showToast?.('Imagem removida do documento', 'info');
+    window.showToast?.('🗑️ Imagem excluída do documento', 'info');
   }
 
-  return { init, selectImage, hideOverlay, updatePosition: _updateOverlayPosition };
+  return { init, selectImage, hideOverlay, updatePosition: _updateOverlayPosition, refresh: hideOverlay };
 
 })();
 
