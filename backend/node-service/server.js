@@ -390,17 +390,25 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   const inlinedHtml = inlineLocalImages(html);
   const cleanHtml   = sanitize(inlinedHtml);
 
+  const numW = Math.max(10, parseFloat(pageWidth) || 210);
+  const numH = Math.max(10, parseFloat(pageHeight) || 297);
+
+  // Margens seguras e proporcionais para formatos grandes e pequenos (ex: 85x55mm)
+  const padV = Math.min(25, Math.max(4, Math.round(numH * 0.08)));
+  const padH = Math.min(20, Math.max(4, Math.round(numW * 0.08)));
+
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap');
-  @page { size: ${pageWidth}mm ${pageHeight}mm; margin: 0; }
+  @page { size: ${numW}mm ${numH}mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: ${numW}mm; min-height: ${numH}mm; margin: 0; padding: 0; }
   body {
     font-family: 'Merriweather', Georgia, serif;
     font-size: 11pt; line-height: 1.75; color: #111111; background-color: #FFFDF5;
-    width: ${pageWidth}mm; min-height: ${pageHeight}mm; padding: 25mm 20mm; position: relative; overflow: hidden;
+    width: ${numW}mm; min-height: ${numH}mm; padding: ${padV}mm ${padH}mm; position: relative; overflow: hidden;
   }
   h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 12pt 0 8pt; color: #111111; text-transform: uppercase; }
   h2 { font-family: 'Bangers', cursive; font-size: 20pt; font-weight: 400; letter-spacing: 0.03em; margin: 16pt 0 8pt; border-bottom: 2px solid #111111; padding-bottom: 4pt; color: #111111; }
@@ -421,7 +429,15 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111111; }
   img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; }
   
-  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor { background: transparent !important; }
+  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
 
   .image-style-align-left  { float: left !important; margin: 8pt 16pt 12pt 0 !important; }
   .image-style-align-right { float: right !important; margin: 8pt 0 12pt 16pt !important; }
@@ -437,19 +453,34 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
 </head><body>${cleanHtml}</body></html>`;
 
   try {
+    const MM_TO_PX = 3.7795275591;
+    const vpW = Math.round(numW * MM_TO_PX);
+    const vpH = Math.round(numH * MM_TO_PX);
+
     const pdf = await renderWithPuppeteer(fullHtml, {
       type: 'pdf',
+      viewport: { width: vpW, height: vpH, deviceScaleFactor: 2 },
       pdfOptions: {
-        width: `${pageWidth}mm`,
-        height: `${pageHeight}mm`,
-        landscape: Boolean(landscape),
+        width: `${numW}mm`,
+        height: `${numH}mm`,
+        landscape: false, // As dimensões já refletem com precisão a largura e altura da página
         printBackground: true,
+        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
       },
     });
 
+    const safeDoc = String(req.body.docName || req.body.doc_name || 'documento')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 40) || 'documento';
+    const safeFmt = String(req.body.formatName || req.body.format_name || `${numW}x${numH}mm`)
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 20) || 'formato';
+    const downloadFilename = `${safeDoc}_${safeFmt}.pdf`;
+
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': 'attachment; filename="documento.pdf"',
+      'Content-Disposition': `attachment; filename="${downloadFilename}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type',
     });
     res.send(pdf);
   } catch (err) {
@@ -462,19 +493,24 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
   const { html = '', pageWidth = 210, pageHeight = 297 } = req.body;
   const inlinedHtml = inlineLocalImages(html);
   const cleanHtml   = sanitize(inlinedHtml);
+  const numW = Math.max(10, parseFloat(pageWidth) || 210);
+  const numH = Math.max(10, parseFloat(pageHeight) || 297);
   const MM_TO_PX    = 3.7795275591;
-  const vpW = Math.round(pageWidth  * MM_TO_PX);
-  const vpH = Math.round(pageHeight * MM_TO_PX);
+  const vpW = Math.round(numW * MM_TO_PX);
+  const vpH = Math.round(numH * MM_TO_PX);
+  const padV = Math.round(Math.min(25, Math.max(4, numH * 0.08)) * MM_TO_PX);
+  const padH = Math.round(Math.min(20, Math.max(4, numW * 0.08)) * MM_TO_PX);
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime&family=EB+Garamond&family=Inter&family=JetBrains+Mono&family=Merriweather&family=Montserrat&family=Playfair+Display&family=Roboto&family=Special+Elite&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: ${vpW}px; min-height: ${vpH}px; margin: 0; padding: 0; }
   body {
     font-family: 'Merriweather', Georgia, serif; font-size: 11pt; line-height: 1.75; color: #111111;
-    width: ${vpW}px; min-height: ${vpH}px; padding: ${Math.round(25 * MM_TO_PX)}px ${Math.round(20 * MM_TO_PX)}px;
+    width: ${vpW}px; min-height: ${vpH}px; padding: ${padV}px ${padH}px;
     background: #FFFDF5; position: relative; overflow: hidden;
   }
   h1 { font-family: 'Bangers', cursive; font-size: 28pt; margin-bottom: 12pt; text-transform: uppercase; }
@@ -489,7 +525,15 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
   figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111; }
   img { max-width: 100%; height: auto; border: 2px solid #111; display: block; }
   
-  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor { background: transparent !important; }
+  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
 
   .image-style-align-left  { float: left !important; margin: 8px 16px 12px 0 !important; }
   .image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
@@ -506,9 +550,18 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
       viewport: { width: vpW, height: vpH, deviceScaleFactor: 2 },
     });
 
+    const safeDoc = String(req.body.docName || req.body.doc_name || 'documento')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 40) || 'documento';
+    const safeFmt = String(req.body.formatName || req.body.format_name || `${numW}x${numH}mm`)
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 20) || 'formato';
+    const downloadFilename = `${safeDoc}_${safeFmt}.png`;
+
     res.set({
       'Content-Type': 'image/png',
-      'Content-Disposition': 'attachment; filename="documento.png"',
+      'Content-Disposition': `attachment; filename="${downloadFilename}"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type',
     });
     res.send(png);
   } catch (err) {

@@ -730,7 +730,7 @@ const ImageResizer = (() => {
     window.showToast?.('🗑️ Imagem excluída do documento', 'info');
   }
 
-  return { init, selectImage, hideOverlay, updatePosition: _updateOverlayPosition };
+  return { init, selectImage, hideOverlay, updatePosition: _updateOverlayPosition, refresh: hideOverlay };
 
 })();
 

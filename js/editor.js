@@ -55,9 +55,16 @@ const EditorApp = (() => {
     const editorEl = document.getElementById('editor');
     if (!editorEl) return;
 
-    // Restaura conteúdo salvo da sessão atual
-    const storageKey = _getStorageKey();
-    const saved = localStorage.getItem(storageKey) || localStorage.getItem(STORAGE_KEY);
+    // Restaura conteúdo salvo da sessão atual ou do projeto ativo
+    let saved = '';
+    if (window.ProjectsManager) {
+      const activeProj = window.ProjectsManager.getActiveProject();
+      if (activeProj && activeProj.content) saved = activeProj.content;
+    }
+    if (!saved) {
+      const storageKey = _getStorageKey();
+      saved = localStorage.getItem(storageKey) || localStorage.getItem(STORAGE_KEY);
+    }
     if (saved && saved.trim()) {
       editorEl.innerHTML = saved;
     }
@@ -668,6 +675,9 @@ const EditorApp = (() => {
       if (content !== undefined && content.trim()) {
         const storageKey = _getStorageKey();
         localStorage.setItem(storageKey, content);
+        if (window.ProjectsManager && typeof window.ProjectsManager.saveCurrentState === 'function') {
+          window.ProjectsManager.saveCurrentState();
+        }
         const now = new Date();
         const time = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         if (ind) {
@@ -679,34 +689,86 @@ const EditorApp = (() => {
   }
 
   /* ══════════════════════════════════════════════════════════
-     API PÚBLICA
+     LIMPEZA E SANITIZAÇÃO DE HTML (Desaninhamento de wrappers)
   ══════════════════════════════════════════════════════════ */
-  function getData() {
-    const sheet = document.getElementById('page-sheet');
-    const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+  function _cleanEditorHtml(rawHtml) {
+    if (!rawHtml || typeof rawHtml !== 'string') return '';
 
-    // Se houver imagens em modo livre no page-sheet, captura o conjunto completo unificado
-    if (sheet) {
-      const freeImgs = sheet.querySelectorAll(':scope > figure.image, :scope > img');
-      if (freeImgs.length > 0) {
-        const clone = sheet.cloneNode(true);
-        clone.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle').forEach(el => el.remove());
-        return clone.innerHTML;
+    const temp = document.createElement('div');
+    temp.innerHTML = rawHtml.trim();
+
+    // 1. Remove artefatos de UI de redimensionamento e balões
+    temp.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle, .resizer-move-handle, .resizer-badge, .link-preview-balloon, .toolbar-link-popover').forEach(el => el.remove());
+
+    // 2. Desaninha recursivamente wrappers externos #editor / .ck-content / .ck-editor__editable
+    let changed = true;
+    let guard = 0;
+    while (changed && guard < 10) {
+      guard++;
+      changed = false;
+      const nested = temp.querySelector('#editor, .ck-editor__editable, .ck-content');
+      if (nested) {
+        if (nested.parentElement === temp && temp.children.length === 1) {
+          temp.innerHTML = nested.innerHTML;
+          changed = true;
+        } else if (nested.id === 'editor') {
+          // Substitui o container pela sua lista de filhos
+          while (nested.firstChild) {
+            nested.parentNode.insertBefore(nested.firstChild, nested);
+          }
+          nested.remove();
+          changed = true;
+        }
       }
     }
 
+    return temp.innerHTML.trim();
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     API PÚBLICA
+  ══════════════════════════════════════════════════════════ */
+  function getData() {
+    let raw = '';
+
     if (_instance) {
       try {
-        const data = _instance.getData();
-        if (data && data.trim()) return data;
-      } catch {}
+        raw = _instance.getData() || '';
+      } catch (e) {
+        console.warn('[EditorApp] Erro em _instance.getData:', e);
+      }
     }
 
-    if (editorEl && editorEl.innerHTML && editorEl.innerHTML.trim()) {
-      return editorEl.innerHTML;
+    if (!raw) {
+      const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+      if (editorEl) raw = editorEl.innerHTML || '';
     }
 
-    return sheet ? sheet.innerHTML : '';
+    return _cleanEditorHtml(raw);
+  }
+
+  function setContent(html) {
+    const editorEl = document.getElementById('editor');
+    const clean = _cleanEditorHtml(html || '<p></p>');
+
+    if (_instance) {
+      try {
+        _instance.setData(clean);
+      } catch (err) {
+        console.warn('[EditorApp] Erro ao aplicar setData no CKEditor:', err);
+        const ed = document.querySelector('.ck-editor__editable') || editorEl;
+        if (ed) ed.innerHTML = clean;
+      }
+    } else if (editorEl) {
+      editorEl.innerHTML = clean;
+    }
+
+    _scheduleWordCount();
+    const ind = document.getElementById('save-indicator');
+    if (ind) {
+      ind.textContent = '💾 Pronto';
+      ind.className = 'status-item saved';
+    }
   }
 
   function getInstance() {
@@ -716,6 +778,7 @@ const EditorApp = (() => {
   return {
     init,
     getData,
+    setContent,
     getInstance,
     toggleLinkDropdown,
     openLinkDropdown,

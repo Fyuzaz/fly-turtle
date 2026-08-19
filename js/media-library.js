@@ -73,6 +73,9 @@ const MediaLibrary = (() => {
   let _folder       = 'Imagens'; // Pasta ativa padrão
   let _allFiles     = [];        // Cache da listagem de arquivos
   let _isOpen       = false;     // Estado da gaveta lateral
+  let _viewMode     = localStorage.getItem('wm_media_view_mode') || 'grid-md'; // 'grid-lg' | 'grid-md' | 'grid-sm' | 'list'
+  let _drawerWidth  = parseInt(localStorage.getItem('wm_media_drawer_width') || '320', 10);
+  let _isCollapsed  = localStorage.getItem('wm_media_folders_collapsed') === 'true';
 
   /* ──────────────────────────────────────────────────────────
      Inicialização
@@ -81,7 +84,145 @@ const MediaLibrary = (() => {
     if (editorInstance) _editor = editorInstance;
     _setupDragDrop();
     _setupSearch();
+    _setupResizer();
+    _applyInitialLayout();
     loadFolders();
+  }
+
+  function _applyInitialLayout() {
+    setDrawerWidth(_drawerWidth, false);
+    setViewMode(_viewMode, false);
+    if (_isCollapsed) {
+      document.getElementById('folder-panel')?.classList.add('collapsed');
+    }
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     CONTROLE DE LAYOUT & REDIMENSIONAMENTO DINÂMICO
+  ══════════════════════════════════════════════════════════ */
+  function setDrawerWidth(width, save = true) {
+    const drawer = document.getElementById('media-drawer');
+    const ws     = document.getElementById('workspace');
+    if (!drawer) return;
+
+    drawer.classList.remove('fullscreen');
+    ws?.classList.remove('drawer-fullscreen');
+
+    let w = typeof width === 'number' ? width : parseInt(width, 10);
+    if (isNaN(w) || w < 300) w = 320;
+    const maxW = Math.min(window.innerWidth - 60, 1100);
+    w = Math.min(w, maxW);
+
+    _drawerWidth = w;
+    document.documentElement.style.setProperty('--drawer-width', `${w}px`);
+    drawer.style.width = `${w}px`;
+
+    // Ativa modo 2 colunas se largura >= 500px
+    if (w >= 500) {
+      drawer.classList.add('wide');
+    } else {
+      drawer.classList.remove('wide');
+    }
+
+    // Atualiza botões de preset ativos
+    document.querySelectorAll('.drawer-size-btn').forEach(btn => {
+      const bw = parseInt(btn.dataset.width, 10);
+      btn.classList.toggle('active', Math.abs(bw - w) < 30);
+    });
+
+    if (save) {
+      try { localStorage.setItem('wm_media_drawer_width', w.toString()); } catch {}
+    }
+  }
+
+  function toggleFullscreen() {
+    const drawer = document.getElementById('media-drawer');
+    const ws     = document.getElementById('workspace');
+    if (!drawer) return;
+
+    const isFull = drawer.classList.toggle('fullscreen');
+    ws?.classList.toggle('drawer-fullscreen', isFull);
+
+    if (isFull) {
+      drawer.classList.add('wide');
+      document.querySelectorAll('.drawer-size-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.width === 'fullscreen');
+      });
+    } else {
+      setDrawerWidth(_drawerWidth);
+    }
+  }
+
+  function toggleFoldersCollapse() {
+    const panel = document.getElementById('folder-panel');
+    if (!panel) return;
+    const collapsed = panel.classList.toggle('collapsed');
+    _isCollapsed = collapsed;
+    try { localStorage.setItem('wm_media_folders_collapsed', collapsed ? 'true' : 'false'); } catch {}
+  }
+
+  function setViewMode(mode, save = true) {
+    _viewMode = mode || 'grid-md';
+    const grid = document.getElementById('files-grid');
+    if (grid) {
+      grid.className = `files-grid view-${_viewMode}`;
+    }
+
+    // Atualiza botões do switcher
+    document.querySelectorAll('.view-mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.view === _viewMode);
+    });
+
+    if (save) {
+      try { localStorage.setItem('wm_media_view_mode', _viewMode); } catch {}
+    }
+
+    if (_allFiles.length > 0) {
+      _renderFiles(_allFiles);
+    }
+  }
+
+  function _setupResizer() {
+    const resizer = document.getElementById('media-drawer-resizer');
+    const drawer  = document.getElementById('media-drawer');
+    if (!resizer || !drawer) return;
+
+    let startX = 0;
+    let startW = 0;
+
+    const onMouseMove = (e) => {
+      const dx = startX - e.clientX;
+      let newW = startW + dx;
+      const minW = 300;
+      const maxW = Math.min(window.innerWidth - 50, 1100);
+      newW = Math.max(minW, Math.min(newW, maxW));
+      setDrawerWidth(newW, false);
+    };
+
+    const onMouseUp = () => {
+      drawer.classList.remove('is-resizing');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      try { localStorage.setItem('wm_media_drawer_width', _drawerWidth.toString()); } catch {}
+    };
+
+    resizer.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startW = drawer.getBoundingClientRect().width;
+      drawer.classList.add('is-resizing');
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Duplo clique na alça alterna entre 320px e 720px
+    resizer.addEventListener('dblclick', () => {
+      if (_drawerWidth > 450) {
+        setDrawerWidth(320);
+      } else {
+        setDrawerWidth(720);
+      }
+    });
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -91,6 +232,8 @@ const MediaLibrary = (() => {
     const drawer = document.getElementById('media-drawer');
     const ws     = document.getElementById('workspace');
     const btn    = document.getElementById('media-library-btn');
+
+    _applyInitialLayout();
 
     drawer?.classList.add('open');
     ws?.classList.add('drawer-open');
@@ -106,7 +249,9 @@ const MediaLibrary = (() => {
     const btn    = document.getElementById('media-library-btn');
 
     drawer?.classList.remove('open');
+    drawer?.classList.remove('fullscreen');
     ws?.classList.remove('drawer-open');
+    ws?.classList.remove('drawer-fullscreen');
     btn?.classList.remove('active');
     _isOpen = false;
   }
@@ -316,7 +461,24 @@ const MediaLibrary = (() => {
       div.className = `file-thumb${isVideo ? ' video' : ''}`;
       div.title = file.name;
 
-      if (isVideo) {
+      if (_viewMode === 'list') {
+        div.innerHTML = `
+          ${isVideo ? `<video src="${_escAttr(file.url)}" muted preload="metadata"></video>` : `<img src="${_escAttr(file.url)}" alt="${_escAttr(file.name)}" loading="lazy" />`}
+          <div class="file-thumb-footer">
+            <span class="file-thumb-name">${_esc(file.name)}</span>
+          </div>
+          <div class="file-thumb-overlay">
+            <button class="thumb-btn insert" title="Inserir no documento" onclick="event.stopPropagation(); MediaLibrary.insertIntoEditor('${_escAttr(file.url)}', '${isVideo ? 'video' : 'image'}')">
+              <span class="btn-icon">➕</span>
+              <span class="btn-txt">Inserir</span>
+            </button>
+            <button class="thumb-btn danger" title="Excluir do servidor" onclick="event.stopPropagation(); MediaLibrary.deleteFile('${_escAttr(file.name)}')">
+              <span class="btn-icon">🗑️</span>
+              <span class="btn-txt">Excluir</span>
+            </button>
+          </div>
+        `;
+      } else if (isVideo) {
         div.innerHTML = `
           <video src="${_escAttr(file.url)}" muted preload="metadata"></video>
           <div class="video-badge">▶ VÍDEO</div>
@@ -654,6 +816,10 @@ const MediaLibrary = (() => {
     openDrawer,
     closeDrawer,
     toggleDrawer,
+    setDrawerWidth,
+    toggleFullscreen,
+    setViewMode,
+    toggleFoldersCollapse,
     loadFolders,
     selectFolder,
     createFolder,

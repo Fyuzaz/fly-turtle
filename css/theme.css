@@ -99,7 +99,9 @@
   /* Heights */
   --header-height:    62px;
   --toolbar-height:   48px;
-  --statusbar-height: 28px;
+  --tabs-bar-height:  38px;
+  --statusbar-height: 24px;
+  --footer-height:    62px;
 }
 
 /* ─── Reset & Base ──────────────────────────── */
@@ -405,7 +407,7 @@ select {
 /* ─── Toast Notifications — Comic Speech Bubble style */
 #toast-container {
   position: fixed;
-  bottom: calc(var(--statusbar-height) + 12px);
+  bottom: calc(var(--footer-height) + 12px);
   right: 20px;
   z-index: var(--z-toast);
   display: flex;

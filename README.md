@@ -24,6 +24,7 @@ Inspirado na estética marcante dos quadrinhos clássicos e publicações vintag
 
 | Recurso | O que você ganha |
 | :--- | :--- |
+| 📑 **Múltiplas Abas de Projetos** | Crie e edite vários documentos ao mesmo tempo através da barra de abas no rodapé (*footer*). |
 | 📄 **Formatos Variados de Folha** | Escolha entre A4, A3, Carta, Ofício ou crie o tamanho personalizado que desejar (em cm, mm ou polegadas). |
 | 🔄 **Orientação Instantânea** | Alterne entre modo **Em Pé (Retrato)** e **Deitado (Paisagem)** com um clique. |
 | ✍️ **Tipografia & Estilos Ricos** | Fontes clássicas e vintage (*Merriweather*, *Special Elite*, *Bangers*, *Courier*), títulos, listas, tabelas e cores. |
@@ -69,9 +70,17 @@ A barra superior de ferramentas oferece tudo o que você precisa para dar vida a
 
 ### 5. Usando a Biblioteca de Mídia
 Clique no botão **🗂️ Mídia** no canto superior direito para abrir a gaveta lateral:
-* **Criar Pastas**: Crie pastas temáticas (ex: *Logotipos*, *Fotos de Produtos*, *Ilustrações*).
-* **Enviar Imagens**: Clique em **Fazer Upload** ou simplesmente **arraste e solte** arquivos do seu computador para dentro da gaveta.
-* **Inserir no Documento**: Clique em qualquer imagem da biblioteca para adicioná-la imediatamente à sua página.
+* **📐 Ajuste de Tamanho e Layout**:
+  * **Arrastar para Redimensionar**: Posicione o mouse na borda esquerda da gaveta e arraste para deixá-la da largura que desejar.
+  * **Presets no Topo**: Alterne entre modo **Compacto (📱 320px)**, **Médio (💻 540px)**, **Estúdio Amplo (🖥️ 780px)** ou **Tela Cheia (⛶)**.
+  * **Modo Explorer 2 Colunas**: Ao expandir a gaveta, as pastas e o upload ficam em uma coluna lateral dedicada, deixando todo o espaço central livre para os arquivos!
+* **🖼️ 4 Modos de Visualização de Arquivos**:
+  * **🔲 Miniaturas Grandes**: Ideal para inspecionar detalhes e alta resolução.
+  * **▦ Grade Média**: Visualização padrão equilibrada.
+  * **▩ Grade Compacta**: Ótimo para pastas com dezenas de fotos.
+  * **☰ Modo Lista**: Exibe o nome completo do arquivo com miniatura e botões de ação rápida.
+* **📂 Pastas e Envio**: Crie pastas, recolha a lista com `▲` para ganhar espaço e envie fotos por clique ou arrastando direto para a janela.
+* **⚡ Inserção Instantânea**: Clique em qualquer miniatura da biblioteca para adicioná-la imediatamente à sua página.
 
 ---
 
@@ -85,7 +94,16 @@ Ao clicar sobre qualquer imagem dentro da folha, você terá controle visual com
 
 ---
 
-### 7. Baixando e Compartilhando seu Documento
+### 7. Trabalhando com Vários Projetos (Abas no Rodapé)
+No rodapé da tela, você encontra a barra de abas retrô para gerenciar múltiplos documentos simultaneamente:
+* **➕ Criar Novo Projeto**: Clique no botão `＋ Nova Aba` para abrir um novo documento em branco sem fechar o atual.
+* **Alternar Entre Documentos**: Clique em qualquer aba no rodapé para visualizar e continuar editando aquele projeto com total fidelidade de formatação, orientação e tamanho de folha.
+* **Renomear em Tempo Real**: Ao editar o nome do documento no topo, a aba no rodapé é atualizada automaticamente.
+* **Fechar Projeto**: Clique no botão `✕` na aba para remover o projeto que você não deseja mais manter.
+
+---
+
+### 8. Baixando e Compartilhando seu Documento
 Quando seu trabalho estiver pronto, clique em um dos botões coloridos no canto superior direito:
 
 * 📄 **PDF**: Gera um arquivo de impressão perfeito, mantendo todas as fontes, cores e posições milimetricamente idênticas à tela.

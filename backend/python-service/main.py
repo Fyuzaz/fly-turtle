@@ -42,10 +42,14 @@ app.add_middleware(
 class ExportRequest(BaseModel):
     html: str = Field(..., description="Conteúdo HTML do documento")
     doc_name: Optional[str] = Field("documento", description="Nome do arquivo para download")
+    docName: Optional[str] = Field(None, description="Nome do arquivo para download")
+    pageWidth: Optional[float] = Field(None, description="Largura da página em mm")
+    pageHeight: Optional[float] = Field(None, description="Altura da página em mm")
     page_width_mm: Optional[float] = Field(210.0, description="Largura da página em mm (padrão: A4 = 210mm)")
     page_height_mm: Optional[float] = Field(297.0, description="Altura da página em mm (padrão: A4 = 297mm)")
     landscape: Optional[bool] = Field(False, description="Orientação paisagem")
     format_name: Optional[str] = Field("A4", description="Nome do formato (informativo)")
+    formatName: Optional[str] = Field(None, description="Nome do formato (informativo)")
 
 
 # ── Conversão mm → cm (Pandoc usa cm para margens) ───────
@@ -57,30 +61,26 @@ def mm_to_cm(mm: float) -> float:
 def _build_pandoc_args(req: ExportRequest) -> list[str]:
     """
     Retorna os extra_args para o Pandoc.
-    Pandoc aceita variáveis de layout via -V.
-    Para DOCX, as dimensões de página são controladas por um reference.docx
-    ou via variáveis da geometria (funciona melhor com PDF, mas para DOCX
-    as margens são passadas como variáveis).
     """
-    # Dimensões em cm (Pandoc usa cm)
-    if req.landscape:
-        w = req.page_height_mm  # inverte para paisagem
-        h = req.page_width_mm
-    else:
-        w = req.page_width_mm
-        h = req.page_height_mm
+    raw_w = req.pageWidth if req.pageWidth is not None else (req.page_width_mm or 210.0)
+    raw_h = req.pageHeight if req.pageHeight is not None else (req.page_height_mm or 297.0)
 
-    margin_cm = 2.5  # 25mm = 2.5cm
+    # Se a largura e altura já estiverem invertidas pelo frontend no modo paisagem, mantém
+    w = float(raw_w)
+    h = float(raw_h)
+
+    margin_top_cm = max(0.5, min(2.5, mm_to_cm(h * 0.08)))
+    margin_side_cm = max(0.5, min(2.0, mm_to_cm(w * 0.08)))
 
     args = [
         "--toc",                     # Sumário automático
         "--toc-depth=3",
-        f"-V", f"paperwidth={mm_to_cm(w):.1f}cm",
-        f"-V", f"paperheight={mm_to_cm(h):.1f}cm",
-        f"-V", f"margin-top={margin_cm}cm",
-        f"-V", f"margin-bottom={margin_cm}cm",
-        f"-V", f"margin-left={margin_cm}cm",
-        f"-V", f"margin-right={margin_cm}cm",
+        "-V", f"paperwidth={mm_to_cm(w):.1f}cm",
+        "-V", f"paperheight={mm_to_cm(h):.1f}cm",
+        "-V", f"margin-top={margin_top_cm:.2f}cm",
+        "-V", f"margin-bottom={margin_top_cm:.2f}cm",
+        "-V", f"margin-left={margin_side_cm:.2f}cm",
+        "-V", f"margin-right={margin_side_cm:.2f}cm",
         "--standalone",
     ]
     return args
