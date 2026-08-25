@@ -151,6 +151,8 @@ const ProjectsManager = (() => {
     project.content = currentContent;
     project.format = currentFmt.name || 'A4';
     project.landscape = !!currentFmt.landscape;
+    project.margins = currentFmt.margins || { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' };
+    project.pageMarginsMap = currentFmt.pageMarginsMap || { 1: { ...project.margins } };
     project.updatedAt = new Date().toISOString();
 
     _saveToStorage();
@@ -163,7 +165,7 @@ const ProjectsManager = (() => {
   /**
    * Cria um novo projeto e o torna ativo
    */
-  function createProject(name = null, initialContent = null, format = 'A4', landscape = false) {
+  function createProject(name = null, initialContent = null, format = 'A4', landscape = false, margins = null, pageMarginsMap = null) {
     saveCurrentState();
 
     const count = _projects.length + 1;
@@ -175,6 +177,8 @@ const ProjectsManager = (() => {
       content: initialContent || `<h2>${projName}</h2><p>Comece a editar seu novo documento aqui...</p>`,
       format: format,
       landscape: landscape,
+      margins: margins || window.PageFormats?.getMargins() || { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' },
+      pageMarginsMap: pageMarginsMap || window.PageFormats?.getPageMarginsMap?.() || { 1: { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' } },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -202,6 +206,8 @@ const ProjectsManager = (() => {
       content: source.content,
       format: source.format,
       landscape: source.landscape,
+      margins: source.margins ? { ...source.margins } : { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' },
+      pageMarginsMap: source.pageMarginsMap ? JSON.parse(JSON.stringify(source.pageMarginsMap)) : { 1: { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' } },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -243,10 +249,15 @@ const ProjectsManager = (() => {
     }
     document.title = `${targetProject.name || 'Documento'} — WebDoc`;
 
-    // 2. Aplica Formato e Orientação de Página
+    // 2. Aplica Formato, Orientação e Margens de Página
     if (window.PageFormats) {
       if (typeof window.PageFormats.setFormatAndOrientation === 'function') {
-        window.PageFormats.setFormatAndOrientation(targetProject.format || 'A4', !!targetProject.landscape);
+        window.PageFormats.setFormatAndOrientation(
+          targetProject.format || 'A4',
+          !!targetProject.landscape,
+          targetProject.margins,
+          targetProject.pageMarginsMap
+        );
       } else {
         window.PageFormats.applyFormat(targetProject.format || 'A4');
       }

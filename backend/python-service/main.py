@@ -47,6 +47,14 @@ class ExportRequest(BaseModel):
     pageHeight: Optional[float] = Field(None, description="Altura da página em mm")
     page_width_mm: Optional[float] = Field(210.0, description="Largura da página em mm (padrão: A4 = 210mm)")
     page_height_mm: Optional[float] = Field(297.0, description="Altura da página em mm (padrão: A4 = 297mm)")
+    marginTop: Optional[float] = Field(None, description="Margem superior em mm")
+    marginBottom: Optional[float] = Field(None, description="Margem inferior em mm")
+    marginLeft: Optional[float] = Field(None, description="Margem esquerda em mm")
+    marginRight: Optional[float] = Field(None, description="Margem direita em mm")
+    margin_top_mm: Optional[float] = Field(None, description="Margem superior em mm")
+    margin_bottom_mm: Optional[float] = Field(None, description="Margem inferior em mm")
+    margin_left_mm: Optional[float] = Field(None, description="Margem esquerda em mm")
+    margin_right_mm: Optional[float] = Field(None, description="Margem direita em mm")
     landscape: Optional[bool] = Field(False, description="Orientação paisagem")
     format_name: Optional[str] = Field("A4", description="Nome do formato (informativo)")
     formatName: Optional[str] = Field(None, description="Nome do formato (informativo)")
@@ -60,27 +68,31 @@ def mm_to_cm(mm: float) -> float:
 # ── Gera um arquivo DOCX de referência via Pandoc ────────
 def _build_pandoc_args(req: ExportRequest) -> list[str]:
     """
-    Retorna os extra_args para o Pandoc.
+    Retorna os extra_args para o Pandoc com suporte a margens personalizadas.
     """
     raw_w = req.pageWidth if req.pageWidth is not None else (req.page_width_mm or 210.0)
     raw_h = req.pageHeight if req.pageHeight is not None else (req.page_height_mm or 297.0)
 
-    # Se a largura e altura já estiverem invertidas pelo frontend no modo paisagem, mantém
     w = float(raw_w)
     h = float(raw_h)
 
-    margin_top_cm = max(0.5, min(2.5, mm_to_cm(h * 0.08)))
-    margin_side_cm = max(0.5, min(2.0, mm_to_cm(w * 0.08)))
+    top_val = req.marginTop if req.marginTop is not None else (req.margin_top_mm if req.margin_top_mm is not None else 25.0)
+    btm_val = req.marginBottom if req.marginBottom is not None else (req.margin_bottom_mm if req.margin_bottom_mm is not None else 25.0)
+    lft_val = req.marginLeft if req.marginLeft is not None else (req.margin_left_mm if req.margin_left_mm is not None else 20.0)
+    rgt_val = req.marginRight if req.marginRight is not None else (req.margin_right_mm if req.margin_right_mm is not None else 20.0)
+
+    margin_top_cm    = mm_to_cm(float(top_val))
+    margin_bottom_cm = mm_to_cm(float(btm_val))
+    margin_left_cm   = mm_to_cm(float(lft_val))
+    margin_right_cm  = mm_to_cm(float(rgt_val))
 
     args = [
-        "--toc",                     # Sumário automático
-        "--toc-depth=3",
-        "-V", f"paperwidth={mm_to_cm(w):.1f}cm",
-        "-V", f"paperheight={mm_to_cm(h):.1f}cm",
+        "-V", f"paperwidth={mm_to_cm(w):.2f}cm",
+        "-V", f"paperheight={mm_to_cm(h):.2f}cm",
         "-V", f"margin-top={margin_top_cm:.2f}cm",
-        "-V", f"margin-bottom={margin_top_cm:.2f}cm",
-        "-V", f"margin-left={margin_side_cm:.2f}cm",
-        "-V", f"margin-right={margin_side_cm:.2f}cm",
+        "-V", f"margin-bottom={margin_bottom_cm:.2f}cm",
+        "-V", f"margin-left={margin_left_cm:.2f}cm",
+        "-V", f"margin-right={margin_right_cm:.2f}cm",
         "--standalone",
     ]
     return args

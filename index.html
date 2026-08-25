@@ -15,9 +15,9 @@
   <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/super-build/ckeditor.js"></script>
 
   <!-- Estilos -->
-  <link rel="stylesheet" href="css/theme.css?v=2.2" />
-  <link rel="stylesheet" href="css/editor.css?v=2.2" />
-  <link rel="stylesheet" href="css/media-library.css?v=2.2" />
+  <link rel="stylesheet" href="css/theme.css?v=3.1" />
+  <link rel="stylesheet" href="css/editor.css?v=3.1" />
+  <link rel="stylesheet" href="css/media-library.css?v=3.1" />
 </head>
 <body>
 
@@ -49,7 +49,7 @@
       />
     </div>
 
-    <!-- Centro: seletor de formato + orientação -->
+    <!-- Centro: seletor de formato + orientação + margens + guias -->
     <div class="header-center">
       <div class="page-format-group" title="Formato de página">
         <select
@@ -72,9 +72,39 @@
             <rect x="4" y="2" width="16" height="20" rx="2" ry="2"/>
           </svg>
         </button>
+
+        <button
+          id="margins-btn"
+          class="header-btn"
+          title="Configurar margens da página"
+          onclick="App.openMarginsModal()"
+          style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-family: var(--font-ui); font-size: 11px; font-weight: 700; background: var(--paper-medium); border: 2px solid var(--ink-black); border-radius: var(--radius-sm); cursor: pointer; height: 32px;"
+        >
+          📐 Margens
+        </button>
+
+        <button
+          id="guides-toggle-btn"
+          class="header-btn"
+          title="Exibir/ocultar linhas-guia de margem da folha"
+          onclick="App.toggleGuides()"
+          style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-family: var(--font-ui); font-size: 11px; font-weight: 700; background: var(--paper-medium); border: 2px solid var(--ink-black); border-radius: var(--radius-sm); cursor: pointer; height: 32px;"
+        >
+          📏 Guias
+        </button>
+
+        <button
+          id="page-break-btn"
+          class="header-btn"
+          title="Inserir quebra de folha física"
+          onclick="App.insertPageBreak()"
+          style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; font-family: var(--font-ui); font-size: 11px; font-weight: 700; background: var(--paper-medium); border: 2px solid var(--ink-black); border-radius: var(--radius-sm); cursor: pointer; height: 32px;"
+        >
+          ✂️ Quebra
+        </button>
       </div>
 
-      <span id="format-chip" class="format-chip">A4 · 210×297mm</span>
+      <span id="format-chip" class="format-chip">A4 · 210×297mm · Normal</span>
     </div>
 
     <!-- Direita: exportar + biblioteca de mídia -->
@@ -346,6 +376,75 @@
 </div><!-- /custom-size-modal -->
 
 <!-- ═══════════════════════════════════════════════════════
+     MODAL — CONFIGURAÇÃO DE MARGENS
+════════════════════════════════════════════════════════ -->
+<div id="margins-modal" class="modal-overlay" role="dialog"
+     aria-modal="true" aria-labelledby="margins-modal-title">
+  <div class="modal" style="max-width: 440px;">
+    <div class="modal-header">
+      <h3 id="margins-modal-title">📐 Configuração de Margens</h3>
+      <button class="modal-close-btn" onclick="App.closeMarginsModal()" aria-label="Fechar">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Escopo de Aplicação de Margens -->
+      <div style="margin-bottom: 12px; background: rgba(243, 233, 210, 0.4); padding: 8px 10px; border: 1px solid var(--color-border-muted); border-radius: var(--radius-sm);">
+        <label for="margin-target-page" style="margin-top: 0; font-size: 11px; font-weight: 700; color: var(--ink-black);">📌 Aplicar margens a:</label>
+        <select id="margin-target-page" onchange="App.onMarginTargetPageChange()" style="width: 100%; margin-top: 4px; padding: 6px 8px; font-size: 12px; font-weight: 600;">
+          <option value="all">Todas as Folhas do Documento</option>
+          <option value="1">Folha 1</option>
+        </select>
+      </div>
+
+      <label>Presets rápidos de margem</label>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px;">
+        <button type="button" class="btn btn-ghost" style="text-align:left; font-size:11px; padding:8px 10px; display:flex; flex-direction:column; gap:2px;" onclick="App.setMarginPreset('normal')">
+          <strong>📄 Normal</strong><span style="font-size:10px; color:var(--color-text-muted);">Sup/Inf: 25mm · Esq/Dir: 20mm</span>
+        </button>
+        <button type="button" class="btn btn-ghost" style="text-align:left; font-size:11px; padding:8px 10px; display:flex; flex-direction:column; gap:2px;" onclick="App.setMarginPreset('narrow')">
+          <strong>📄 Estreita</strong><span style="font-size:10px; color:var(--color-text-muted);">12.7mm (todos os lados)</span>
+        </button>
+        <button type="button" class="btn btn-ghost" style="text-align:left; font-size:11px; padding:8px 10px; display:flex; flex-direction:column; gap:2px;" onclick="App.setMarginPreset('moderate')">
+          <strong>📄 Moderada</strong><span style="font-size:10px; color:var(--color-text-muted);">Sup/Inf: 25.4mm · Esq/Dir: 19mm</span>
+        </button>
+        <button type="button" class="btn btn-ghost" style="text-align:left; font-size:11px; padding:8px 10px; display:flex; flex-direction:column; gap:2px;" onclick="App.setMarginPreset('wide')">
+          <strong>📄 Larga</strong><span style="font-size:10px; color:var(--color-text-muted);">Sup/Inf: 25.4mm · Esq/Dir: 50.8mm</span>
+        </button>
+      </div>
+
+      <div style="border-top: 1px solid var(--color-border-muted); padding-top: 12px; margin-top: 4px;">
+        <label>Definição personalizada de margens (mm)</label>
+        <div class="input-row-2">
+          <div>
+            <label style="margin-top:0;font-size:10px;">Superior (Top)</label>
+            <input id="margin-top-input" type="number" min="0" max="150" step="0.5" value="25" />
+          </div>
+          <div>
+            <label style="margin-top:0;font-size:10px;">Inferior (Bottom)</label>
+            <input id="margin-bottom-input" type="number" min="0" max="150" step="0.5" value="25" />
+          </div>
+        </div>
+        <div class="input-row-2" style="margin-top: 8px;">
+          <div>
+            <label style="margin-top:0;font-size:10px;">Esquerda (Left)</label>
+            <input id="margin-left-input" type="number" min="0" max="150" step="0.5" value="20" />
+          </div>
+          <div>
+            <label style="margin-top:0;font-size:10px;">Direita (Right)</label>
+            <input id="margin-right-input" type="number" min="0" max="150" step="0.5" value="20" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="App.closeMarginsModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="App.applyMarginsFromModal()">Aplicar Margens</button>
+    </div>
+  </div>
+</div><!-- /margins-modal -->
+
+<!-- ═══════════════════════════════════════════════════════
      MODAL — INSERIR / EDITAR HIPERLINK (Vintage Comix Edition)
 ════════════════════════════════════════════════════════ -->
 <div id="link-modal" class="modal-overlay" role="dialog"
@@ -388,13 +487,13 @@
 <!-- ═══════════════════════════════════════════════════════
      SCRIPTS
 ════════════════════════════════════════════════════════ -->
-<script src="js/page-formats.js?v=2.2"></script>
-<script src="js/projects-manager.js?v=2.2"></script>
-<script src="js/media-library.js?v=2.2"></script>
-<script src="js/upload-adapter.js?v=2.2"></script>
-<script src="js/image-resizer.js?v=2.2"></script>
-<script src="js/export.js?v=2.2"></script>
-<script src="js/editor.js?v=2.2"></script>
+<script src="js/page-formats.js?v=3.3"></script>
+<script src="js/projects-manager.js?v=3.3"></script>
+<script src="js/media-library.js?v=3.3"></script>
+<script src="js/upload-adapter.js?v=3.3"></script>
+<script src="js/image-resizer.js?v=3.3"></script>
+<script src="js/export.js?v=3.3"></script>
+<script src="js/editor.js?v=3.3"></script>
 
 <script>
 /* ══════════════════════════════════════════════════════════
@@ -410,7 +509,12 @@ const App = (() => {
     // 2. Inicia formatos de página e sincroniza com o projeto ativo
     PageFormats.init();
     if (activeProj) {
-      PageFormats.setFormatAndOrientation(activeProj.format || 'A4', !!activeProj.landscape);
+      PageFormats.setFormatAndOrientation(
+        activeProj.format || 'A4',
+        !!activeProj.landscape,
+        activeProj.margins,
+        activeProj.pageMarginsMap
+      );
       const nameInput = document.getElementById('doc-name-input');
       if (nameInput) nameInput.value = activeProj.name || 'Novo Documento';
       document.title = `${activeProj.name || 'Documento'} — WebDoc`;
@@ -428,6 +532,7 @@ const App = (() => {
     // Escuta mudanças de formato
     window.addEventListener('pageFormatChanged',   e => _updateFormatChip(e.detail));
     window.addEventListener('customFormatsUpdated', () => _buildFormatSelector());
+    window.addEventListener('pageMarginsChanged',  () => _updateFormatChip(PageFormats.getCurrent()));
 
     // Foco automático ao clicar na folha
     document.getElementById('page-sheet')?.addEventListener('click', e => {
@@ -444,61 +549,74 @@ const App = (() => {
     });
   }
 
-  /* ── Seletor de formatos ────────────────────────────────── */
+  /* ── Seletores de Formato no Header ─────────────────────── */
   function _buildFormatSelector() {
     const sel = document.getElementById('page-format-select');
     if (!sel) return;
 
-    const { groups, custom } = PageFormats.getAllFormats();
-    const current = PageFormats.getCurrent().name;
+    const data = PageFormats.getAllFormats();
+    const cur  = PageFormats.getCurrent();
+
     sel.innerHTML = '';
 
-    // Grupos de presets
-    Object.entries(groups).forEach(([groupName, names]) => {
-      const og = document.createElement('optgroup');
-      og.label = groupName;
-      names.forEach(n => {
+    // Presets agrupados
+    Object.entries(data.groups).forEach(([groupName, keys]) => {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = groupName;
+      keys.forEach(k => {
         const opt = document.createElement('option');
-        opt.value = n;
-        opt.textContent = PageFormats.getLabel(n);
-        opt.selected = (n === current);
-        og.appendChild(opt);
+        opt.value = k;
+        opt.textContent = PageFormats.getLabel(k);
+        if (k === cur.name) opt.selected = true;
+        optgroup.appendChild(opt);
       });
-      sel.appendChild(og);
+      sel.appendChild(optgroup);
     });
 
-    // Formatos customizados
-    const customKeys = Object.keys(custom);
-    if (customKeys.length) {
-      const og = document.createElement('optgroup');
-      og.label = '⭐ Meus Formatos';
-      customKeys.forEach(n => {
+    // Formatos customizados salvos
+    const customKeys = Object.keys(data.custom);
+    if (customKeys.length > 0) {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = 'Personalizados';
+      customKeys.forEach(k => {
         const opt = document.createElement('option');
-        opt.value = n;
-        opt.textContent = PageFormats.getLabel(n);
-        opt.selected = (n === current);
-        og.appendChild(opt);
+        opt.value = k;
+        opt.textContent = `${k} (${data.custom[k].width}×${data.custom[k].height}mm)`;
+        if (k === cur.name) opt.selected = true;
+        optgroup.appendChild(opt);
       });
-      sel.appendChild(og);
+      sel.appendChild(optgroup);
+    }
+  }
+
+  function _updateFormatChip(fmt) {
+    const chip = document.getElementById('format-chip');
+    if (!chip || !fmt) return;
+    const w = Math.round(fmt.width);
+    const h = Math.round(fmt.height);
+    const mName = fmt.margins?.name || 'Normal';
+    const pText = fmt.totalPages > 1 ? ` · ${fmt.totalPages} págs` : '';
+    chip.textContent = `${fmt.name} · ${w}×${h}mm · ${mName}${pText}`;
+
+    const dim = document.getElementById('page-dimensions');
+    if (dim) {
+      const pagesStr = fmt.totalPages > 1 ? ` · ${fmt.totalPages} páginas` : ' · 1 página';
+      dim.textContent = `${w} × ${h} mm${pagesStr}`;
     }
 
-    // Opção "Personalizado..."
-    const divider = document.createElement('option');
-    divider.disabled = true;
-    divider.textContent = '──────────';
-    sel.appendChild(divider);
-
-    const custom_opt = document.createElement('option');
-    custom_opt.value = '__custom__';
-    custom_opt.textContent = '📐 Tamanho personalizado...';
-    sel.appendChild(custom_opt);
+    // Sincroniza o seletor visual caso mude externamente
+    const sel = document.getElementById('page-format-select');
+    if (sel && sel.value !== fmt.name) {
+      const exists = [...sel.options].some(o => o.value === fmt.name);
+      if (exists) sel.value = fmt.name;
+    }
   }
 
   function onFormatChange(value) {
     if (value === '__custom__') {
-      // Restaura a seleção anterior antes de abrir o modal
       const current = PageFormats.getCurrent().name;
-      document.getElementById('page-format-select').value = current;
+      const sel = document.getElementById('page-format-select');
+      if (sel) sel.value = current;
       openCustomModal();
       return;
     }
@@ -507,37 +625,142 @@ const App = (() => {
       window.ProjectsManager.saveCurrentState();
       window.ProjectsManager.renderTabs();
     }
+    _updateFormatChip(PageFormats.getCurrent());
+    showToast(`Formato alterado para ${value}`, 'info');
   }
 
-  /* ── Orientação ────────────────────────────────────────── */
+  function onFormatSelectChange() {
+    const sel = document.getElementById('page-format-select');
+    if (!sel) return;
+    onFormatChange(sel.value);
+  }
+
   function toggleOrientation() {
-    const isLandscape = PageFormats.toggleOrientation();
-    const btn = document.getElementById('orientation-btn');
-    if (btn) btn.classList.toggle('landscape', isLandscape);
-    btn?.setAttribute('title', isLandscape ? 'Orientação: Paisagem (clique para Retrato)' : 'Orientação: Retrato (clique para Paisagem)');
+    const isLand = PageFormats.toggleOrientation();
+    const btn    = document.getElementById('orientation-btn');
+    if (btn) btn.classList.toggle('landscape', isLand);
+
     if (window.ProjectsManager) {
       window.ProjectsManager.saveCurrentState();
       window.ProjectsManager.renderTabs();
     }
+
+    _updateFormatChip(PageFormats.getCurrent());
+    showToast(isLand ? 'Orientação: Paisagem' : 'Orientação: Retrato', 'info');
   }
 
-  /* ── Chip de formato ───────────────────────────────────── */
-  function _updateFormatChip(fmt) {
-    const chip = document.getElementById('format-chip');
-    const dims = document.getElementById('page-dimensions');
-    const w    = Math.round(fmt.width);
-    const h    = Math.round(fmt.height);
-    const label = `${fmt.name} · ${w}×${h}mm`;
+  /* ── Modal de Margens ──────────────────────────────────── */
+  function openMarginsModal(targetPage = null) {
+    const modal = document.getElementById('margins-modal');
+    if (!modal) return;
 
-    if (chip) chip.textContent = label;
-    if (dims) dims.textContent = `${w} × ${h} mm`;
+    const totalPages = PageFormats.getTotalPages() || 1;
+    const targetSelect = document.getElementById('margin-target-page');
+    if (targetSelect) {
+      targetSelect.innerHTML = '';
+      const optAll = document.createElement('option');
+      optAll.value = 'all';
+      optAll.textContent = 'Todas as Folhas do Documento';
+      targetSelect.appendChild(optAll);
 
-    // Atualiza seletor para refletir formato atual
-    const sel = document.getElementById('page-format-select');
-    if (sel && sel.value !== fmt.name) {
-      const exists = [...sel.options].some(o => o.value === fmt.name);
-      if (exists) sel.value = fmt.name;
+      for (let p = 1; p <= totalPages; p++) {
+        const opt = document.createElement('option');
+        opt.value = String(p);
+        const pMargins = PageFormats.getPageMargins(p);
+        opt.textContent = `Folha ${p} (${pMargins.name || 'Personalizada'})`;
+        targetSelect.appendChild(opt);
+      }
+
+      if (targetPage !== null && targetPage !== undefined) {
+        targetSelect.value = String(targetPage);
+      } else {
+        targetSelect.value = 'all';
+      }
     }
+
+    onMarginTargetPageChange();
+    modal.classList.add('active');
+  }
+
+  function onMarginTargetPageChange() {
+    const targetVal = document.getElementById('margin-target-page')?.value || 'all';
+    const pageNum = targetVal === 'all' ? 1 : parseInt(targetVal, 10);
+    const m = PageFormats.getPageMargins(pageNum);
+
+    const topEl = document.getElementById('margin-top-input');
+    const btmEl = document.getElementById('margin-bottom-input');
+    const lftEl = document.getElementById('margin-left-input');
+    const rgtEl = document.getElementById('margin-right-input');
+
+    if (topEl) topEl.value = m.top;
+    if (btmEl) btmEl.value = m.bottom;
+    if (lftEl) lftEl.value = m.left;
+    if (rgtEl) rgtEl.value = m.right;
+  }
+
+  function closeMarginsModal() {
+    document.getElementById('margins-modal')?.classList.remove('active');
+  }
+
+  function setMarginPreset(key) {
+    const targetVal = document.getElementById('margin-target-page')?.value || 'all';
+    const m = PageFormats.applyMarginPreset(key, targetVal);
+    if (m) {
+      if (window.ProjectsManager) {
+        window.ProjectsManager.saveCurrentState();
+      }
+      _updateFormatChip(PageFormats.getCurrent());
+      const label = targetVal === 'all' ? 'em todas as folhas' : `na Folha ${targetVal}`;
+      showToast(`Margens "${m.name}" aplicadas ${label}!`, 'success');
+      closeMarginsModal();
+    }
+  }
+
+  function applyMarginsFromModal() {
+    const targetVal = document.getElementById('margin-target-page')?.value || 'all';
+    const top    = document.getElementById('margin-top-input')?.value;
+    const bottom = document.getElementById('margin-bottom-input')?.value;
+    const left   = document.getElementById('margin-left-input')?.value;
+    const right  = document.getElementById('margin-right-input')?.value;
+
+    const m = PageFormats.applyMargins(top, bottom, left, right, 'Personalizada', true, targetVal);
+    if (window.ProjectsManager) {
+      window.ProjectsManager.saveCurrentState();
+    }
+    _updateFormatChip(PageFormats.getCurrent());
+    const label = targetVal === 'all' ? 'em todas as folhas' : `na Folha ${targetVal}`;
+    showToast(`Margens aplicadas ${label} (${m.top}/${m.bottom}/${m.left}/${m.right}mm)!`, 'success');
+    closeMarginsModal();
+  }
+
+  function toggleGuides() {
+    const isShowing = PageFormats.toggleMarginGuides();
+    const btn = document.getElementById('guides-toggle-btn');
+    if (btn) {
+      btn.style.background = isShowing ? 'var(--burnt-orange)' : 'var(--paper-medium)';
+      btn.style.color = isShowing ? '#fff' : 'inherit';
+    }
+    showToast(isShowing ? '📏 Linhas-guia de margem ativadas' : 'Linhas-guia desativadas', 'info');
+  }
+
+  function insertPageBreak() {
+    const editor = EditorApp.getInstance();
+    const breakHtml = '<div class="page-break"></div><p>&nbsp;</p>';
+    if (editor) {
+      editor.model.change(writer => {
+        const viewFragment = editor.data.processor.toView(breakHtml);
+        const modelFragment = editor.data.toModel(viewFragment);
+        editor.model.insertContent(modelFragment);
+      });
+      showToast('✂️ Quebra de folha física inserida!', 'success');
+    } else {
+      const edEl = document.getElementById('editor');
+      if (edEl) {
+        edEl.insertAdjacentHTML('beforeend', breakHtml);
+        showToast('✂️ Quebra de folha física inserida!', 'success');
+      }
+    }
+    PageFormats.updatePageBoundaries();
   }
 
   /* ── Modal Tamanho Personalizado ────────────────────────── */
@@ -600,6 +823,7 @@ const App = (() => {
   /* ── Fechar modal clicando fora ────────────────────────── */
   document.addEventListener('click', e => {
     if (e.target.id === 'custom-size-modal') closeCustomModal();
+    if (e.target.id === 'margins-modal') closeMarginsModal();
     if (e.target.id === 'link-modal') EditorApp?.closeLinkModal?.();
   });
 
@@ -607,11 +831,29 @@ const App = (() => {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       closeCustomModal();
+      closeMarginsModal();
       EditorApp?.closeLinkModal?.();
     }
   });
 
-  return { init, onFormatChange, toggleOrientation, openCustomModal, closeCustomModal, previewCustom, onCustomUnitChange, applyCustomSize };
+  return {
+    init,
+    onFormatChange,
+    onFormatSelectChange,
+    toggleOrientation,
+    openCustomModal,
+    closeCustomModal,
+    previewCustom,
+    onCustomUnitChange,
+    applyCustomSize,
+    openMarginsModal,
+    onMarginTargetPageChange,
+    closeMarginsModal,
+    setMarginPreset,
+    applyMarginsFromModal,
+    toggleGuides,
+    insertPageBreak
+  };
 
 })();
 

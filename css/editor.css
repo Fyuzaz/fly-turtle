@@ -745,13 +745,13 @@
 
 /* ─── Page Sheet — Yellowed Newsprint ────────── */
 #page-sheet {
-  width: var(--page-width);
-  min-height: var(--page-height);
+  width: var(--page-width, 210mm);
+  min-height: var(--page-height, 297mm);
   background: var(--color-page);
   box-shadow: var(--shadow-page);
   box-sizing: border-box;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   transition: width 0.3s ease, min-height 0.3s ease;
   border: 3px solid var(--ink-black);
   /* Subtle aged paper tint */
@@ -778,12 +778,246 @@
   border-width: 0 18px 18px 0;
   border-color: transparent var(--color-workspace) transparent transparent;
   filter: drop-shadow(-2px 2px 0px rgba(17,17,17,0.2));
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Guias de Margem Visuais (Toggle) */
+#page-sheet.show-guides::before {
+  content: '';
+  position: absolute;
+  top: var(--page-margin-top, 25mm);
+  left: var(--page-margin-left, 20mm);
+  right: var(--page-margin-right, 20mm);
+  bottom: var(--page-margin-bottom, 25mm);
+  border: 1px dashed rgba(217, 93, 57, 0.45);
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Divisores Físicos entre Folhas com Margens Independentes e Vão de Mesa */
+.multi-page-break {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  z-index: 20;
+  user-select: none;
+  pointer-events: none;
+}
+
+.page-break-margin-bottom {
+  width: 100%;
+  background: var(--color-page);
+  border-left: 3px solid var(--ink-black);
+  border-right: 3px solid var(--ink-black);
+  border-bottom: 3px solid var(--ink-black);
+  border-top: 1px dashed rgba(217, 93, 57, 0.4);
+  box-shadow: 0 4px 6px rgba(17,17,17,0.12);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  box-sizing: border-box;
+}
+
+.page-break-desk-gap {
+  width: calc(100% + 40px);
+  margin-left: -20px;
+  height: 36px;
+  background: var(--color-workspace);
+  background-image:
+    radial-gradient(circle, rgba(17,17,17,0.15) 1px, transparent 1px),
+    linear-gradient(rgba(17,17,17,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(17,17,17,0.03) 1px, transparent 1px);
+  background-size: 20px 20px, 80px 80px, 80px 80px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  box-sizing: border-box;
+}
+
+.page-break-margin-top {
+  width: 100%;
+  background: var(--color-page);
+  border-left: 3px solid var(--ink-black);
+  border-right: 3px solid var(--ink-black);
+  border-top: 3px solid var(--ink-black);
+  border-bottom: 1px dashed rgba(217, 93, 57, 0.4);
+  box-shadow: 0 -2px 4px rgba(17,17,17,0.08);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4px;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.page-break-margin-top::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 16px 16px 0;
+  border-color: transparent var(--color-workspace) transparent transparent;
+  filter: drop-shadow(-2px 2px 0px rgba(17,17,17,0.2));
+  z-index: 5;
+  pointer-events: none;
+}
+
+.page-margin-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.03em;
+  background: rgba(243, 233, 210, 0.6);
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.multi-page-break-label {
+  background: var(--ink-black);
+  color: var(--aged-paper);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--burnt-orange);
+  box-shadow: 2px 2px 0px var(--ink-black);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.multi-page-break-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--burnt-orange);
+  background: var(--paper-dark);
+  padding: 2px 8px;
+  border: 1px solid var(--ink-black);
+  border-radius: 2px;
+}
+
+.page-break-margin-btn {
+  background: var(--aged-paper);
+  color: var(--ink-black);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1.5px solid var(--ink-black);
+  border-radius: 3px;
+  box-shadow: 2px 2px 0px var(--ink-black);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.1s ease, background 0.15s ease, box-shadow 0.1s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.page-break-margin-btn:hover {
+  background: var(--burnt-orange);
+  color: #ffffff;
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0px var(--ink-black);
+}
+
+.page-break-margin-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px var(--ink-black);
+}
+
+/* Molduras de Linhas-Guia Independentes por Folha */
+.page-guide-box {
+  position: absolute;
+  border: 1px dashed rgba(217, 93, 57, 0.45);
+  pointer-events: none;
+  z-index: 6;
+  box-sizing: border-box;
+}
+
+/* Divisores de Página / Limite de Folha Periódicos */
+.page-boundary-marker {
+  position: absolute;
+  left: -3px;
+  right: -3px;
+  height: 0;
+  border-top: 2px dashed rgba(217, 93, 57, 0.6);
+  z-index: 25;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.page-boundary-badge {
+  background: var(--ink-black);
+  color: var(--aged-paper);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 12px;
+  border-radius: 3px;
+  border: 1px solid var(--burnt-orange);
+  box-shadow: 2px 2px 0px var(--ink-black);
+  transform: translateY(-50%);
+  pointer-events: auto;
+  user-select: none;
+}
+
+/* Quebra de Página Manual */
+.page-break {
+  page-break-after: always;
+  break-after: page;
+  display: block;
+  position: relative;
+  margin: 24px 0;
+  border: none;
+  border-top: 2px dashed var(--burnt-orange);
+  text-align: center;
+  height: 1px;
+}
+
+.page-break::after {
+  content: '✂️ QUEBRA DE PÁGINA';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--paper-dark);
+  padding: 0 10px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  color: var(--burnt-orange);
+  border: 1px solid var(--ink-black);
+  border-radius: 2px;
+}
+
+/* Elemento que inicia em uma nova página (pula a margem inferior da folha anterior, o vão de mesa e a margem superior da nova folha) */
+.page-first-element {
+  margin-top: calc(var(--page-margin-bottom, 25mm) + 36px + var(--page-margin-top, 25mm)) !important;
+  position: relative;
 }
 
 /* ─── CKEditor & Default Editable Area ───────── */
 #editor {
-  min-height: calc(var(--page-height) - var(--page-pad-v) * 2 - 10px);
-  padding: var(--page-pad-v) var(--page-pad-h);
+  min-height: calc(var(--page-height, 297mm) - var(--page-margin-top, 25mm) - var(--page-margin-bottom, 25mm));
+  padding: var(--page-margin-top, 25mm) var(--page-margin-right, 20mm) var(--page-margin-bottom, 25mm) var(--page-margin-left, 20mm);
   outline: none;
   font-family: var(--font-document);
   font-size: 11pt;
@@ -794,8 +1028,8 @@
 }
 
 .ck.ck-editor__editable_inline {
-  min-height: calc(var(--page-height) - var(--page-pad-v) * 2 - 10px);
-  padding: var(--page-pad-v) var(--page-pad-h) !important;
+  min-height: calc(var(--page-height, 297mm) - var(--page-margin-top, 25mm) - var(--page-margin-bottom, 25mm));
+  padding: var(--page-margin-top, 25mm) var(--page-margin-right, 20mm) var(--page-margin-bottom, 25mm) var(--page-margin-left, 20mm) !important;
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
@@ -805,6 +1039,7 @@
   color: #1a1008 !important;
   background: transparent !important;
   cursor: text;
+  box-sizing: border-box !important;
 }
 
 .ck.ck-editor__editable_inline:focus {
@@ -842,8 +1077,6 @@
   font-weight: 400;
   margin: 16pt 0 8pt;
   color: var(--ink-black);
-  border-bottom: 2px solid var(--ink-black);
-  padding-bottom: 4pt;
   letter-spacing: 0.03em;
 }
 

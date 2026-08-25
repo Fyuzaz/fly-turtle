@@ -20,18 +20,29 @@ const Exporter = (() => {
      OBTER CONTEÚDO HTML DO DOCUMENTO (Multi-Estratégia)
   ══════════════════════════════════════════════════════════ */
   function getDocumentHtml() {
-    const sheet = document.getElementById('page-sheet');
     const editor = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+    const sheet = document.getElementById('page-sheet');
 
-    if (!sheet) {
-      return editor ? editor.innerHTML : (window.EditorApp?.getData() || '');
-    }
+    let sourceEl = editor || sheet;
+    if (!sourceEl) return window.EditorApp?.getData() || '';
 
-    // Clona o page-sheet para capturar fielmente texto e imagens livres
-    const clone = sheet.cloneNode(true);
+    // Clona para sanitização segura
+    const clone = sourceEl.cloneNode(true);
 
-    // Remove overlays de controle de UI (resizer, drop indicators)
-    clone.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle').forEach(el => el.remove());
+    // Remove 100% dos elementos de UI, divisores visuais de tela, réguas e overlays
+    clone.querySelectorAll(`
+      #img-resizer-overlay, .img-resizer-overlay,
+      #img-drop-indicator, .img-drop-indicator,
+      .resizer-toolbar, .resizer-handle, .resizer-move-handle, .resizer-badge,
+      .link-preview-balloon, .toolbar-link-popover,
+      .multi-page-break, .page-guide-box, .page-boundary-marker, .page-boundary-badge,
+      .page-break-margin-bottom, .page-break-desk-gap, .page-break-margin-top, .page-margin-tag
+    `).forEach(el => el.remove());
+
+    // Se o elemento tiver classe .page-first-element, remove a margem visual de tela para não distorcer a paginação nativa do PDF/DOCX
+    clone.querySelectorAll('.page-first-element').forEach(el => {
+      el.classList.remove('page-first-element');
+    });
 
     return clone.innerHTML;
   }
@@ -52,6 +63,7 @@ const Exporter = (() => {
     }
 
     const fmt     = window.PageFormats?.getCurrent() || { width: 210, height: 297, name: 'A4', landscape: false };
+    const margins = window.PageFormats?.getMargins?.() || fmt.margins || { top: 25, bottom: 25, left: 20, right: 20 };
     const docName = document.getElementById('doc-name-input')?.value?.trim() || 'documento';
     const btn     = document.getElementById(`export-${format}-btn`);
 
@@ -72,6 +84,15 @@ const Exporter = (() => {
         landscape:      fmt.landscape,
         formatName:     fmt.name,
         format_name:    fmt.name,
+        marginTop:      margins.top,
+        marginBottom:   margins.bottom,
+        marginLeft:     margins.left,
+        marginRight:    margins.right,
+        margin_top_mm:  margins.top,
+        margin_bottom_mm: margins.bottom,
+        margin_left_mm: margins.left,
+        margin_right_mm: margins.right,
+        pageMarginsMap: window.PageFormats?.getPageMarginsMap?.() || { 1: margins },
         docName,
         doc_name:       docName,
       };
@@ -136,8 +157,11 @@ const Exporter = (() => {
      Fallback de DOCX nativo do navegador (Office HTML Word)
   ────────────────────────────────────────────────────────── */
   function _exportHtmlDocx(html, docName, fmt, targetFilename) {
-    const padV = Math.min(25, Math.max(4, Math.round(fmt.height * 0.08)));
-    const padH = Math.min(20, Math.max(4, Math.round(fmt.width * 0.08)));
+    const m = fmt.margins || window.PageFormats?.getMargins() || { top: 25, bottom: 25, left: 20, right: 20 };
+    const padTop = Math.max(0, m.top);
+    const padBtm = Math.max(0, m.bottom);
+    const padLft = Math.max(0, m.left);
+    const padRgt = Math.max(0, m.right);
     const filename = targetFilename || `${_sanitize(docName)}_${_sanitize(fmt.name)}_${_timestamp()}.doc`;
 
     const header = `<!DOCTYPE html><html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
@@ -154,12 +178,12 @@ const Exporter = (() => {
 <style>
   @page {
     size: ${fmt.width}mm ${fmt.height}mm;
-    margin: ${padV}mm ${padH}mm ${padV}mm ${padH}mm;
+    margin: ${padTop}mm ${padRgt}mm ${padBtm}mm ${padLft}mm;
   }
   @page Section1 {
     size: ${fmt.width}mm ${fmt.height}mm;
     mso-page-orientation: ${fmt.landscape ? 'landscape' : 'portrait'};
-    margin: ${padV}mm ${padH}mm ${padV}mm ${padH}mm;
+    margin: ${padTop}mm ${padRgt}mm ${padBtm}mm ${padLft}mm;
     mso-header-margin: 10mm;
     mso-footer-margin: 10mm;
     mso-paper-source: 0;

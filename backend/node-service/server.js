@@ -223,7 +223,13 @@ const { window } = new JSDOM('');
 const DOMPurify  = createDOMPurify(window);
 
 function sanitize(html) {
-  return DOMPurify.sanitize(html, {
+  if (!html) return '';
+
+  // 1. Remove qualquer elemento de UI visual de tela remanescente
+  let cleaned = html.replace(/<div\s+[^>]*class=["'][^"']*(?:multi-page-break|page-guide-box|page-boundary-marker|img-resizer-overlay|img-drop-indicator|resizer-toolbar|link-preview-balloon|toolbar-link-popover)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
+  cleaned = cleaned.replace(/<span\s+[^>]*class=["'][^"']*(?:multi-page-break-label|multi-page-break-tag|page-margin-tag|page-boundary-badge)[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, '');
+
+  return DOMPurify.sanitize(cleaned, {
     ALLOWED_TAGS: [
       'h1','h2','h3','h4','h5','h6','p','br','strong','b','em','i','u','s','strike',
       'sub','sup','span','ul','ol','li','table','thead','tbody','tfoot','tr','th','td',
@@ -386,32 +392,62 @@ function inlineLocalImages(html) {
    ROTAS DE EXPORTAÇÃO (PDF / PNG)
 ══════════════════════════════════════════════════════════ */
 app.post('/api/export/pdf', exportLimiter, async (req, res) => {
-  const { html = '', pageWidth = 210, pageHeight = 297, landscape = false } = req.body;
+  const {
+    html = '',
+    pageWidth = 210,
+    pageHeight = 297,
+    marginTop,
+    marginBottom,
+    marginLeft,
+    marginRight,
+    margin_top_mm,
+    margin_bottom_mm,
+    margin_left_mm,
+    margin_right_mm
+  } = req.body;
+
   const inlinedHtml = inlineLocalImages(html);
   const cleanHtml   = sanitize(inlinedHtml);
 
   const numW = Math.max(10, parseFloat(pageWidth) || 210);
   const numH = Math.max(10, parseFloat(pageHeight) || 297);
 
-  // Margens seguras e proporcionais para formatos grandes e pequenos (ex: 85x55mm)
-  const padV = Math.min(25, Math.max(4, Math.round(numH * 0.08)));
-  const padH = Math.min(20, Math.max(4, Math.round(numW * 0.08)));
+  const pageMarginsMap = req.body.pageMarginsMap || {};
+  const p1Margin = pageMarginsMap[1] || pageMarginsMap['1'] || {};
+
+  const topVal = p1Margin.top !== undefined ? p1Margin.top : (marginTop !== undefined ? marginTop : margin_top_mm);
+  const btmVal = p1Margin.bottom !== undefined ? p1Margin.bottom : (marginBottom !== undefined ? marginBottom : margin_bottom_mm);
+  const lftVal = p1Margin.left !== undefined ? p1Margin.left : (marginLeft !== undefined ? marginLeft : margin_left_mm);
+  const rgtVal = p1Margin.right !== undefined ? p1Margin.right : (marginRight !== undefined ? marginRight : margin_right_mm);
+
+  const padTop = (topVal !== undefined && topVal !== null && topVal !== '') ? Math.max(0, parseFloat(topVal)) : 25;
+  const padBtm = (btmVal !== undefined && btmVal !== null && btmVal !== '') ? Math.max(0, parseFloat(btmVal)) : 25;
+  const padLft = (lftVal !== undefined && lftVal !== null && lftVal !== '') ? Math.max(0, parseFloat(lftVal)) : 20;
+  const padRgt = (rgtVal !== undefined && rgtVal !== null && rgtVal !== '') ? Math.max(0, parseFloat(rgtVal)) : 20;
+
+  console.log(`[PDF Export] Dimensões: ${numW}x${numH}mm | Margens P1: Top=${padTop}mm, Bottom=${padBtm}mm, Left=${padLft}mm, Right=${padRgt}mm | Folhas no mapa: ${Object.keys(pageMarginsMap).length}`);
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap');
-  @page { size: ${numW}mm ${numH}mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: ${numW}mm; min-height: ${numH}mm; margin: 0; padding: 0; }
-  body {
-    font-family: 'Merriweather', Georgia, serif;
-    font-size: 11pt; line-height: 1.75; color: #111111; background-color: #FFFDF5;
-    width: ${numW}mm; min-height: ${numH}mm; padding: ${padV}mm ${padH}mm; position: relative; overflow: hidden;
+  @page {
+    size: ${numW}mm ${numH}mm;
+    margin: ${padTop}mm ${padRgt}mm ${padBtm}mm ${padLft}mm;
   }
-  h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 12pt 0 8pt; color: #111111; text-transform: uppercase; }
-  h2 { font-family: 'Bangers', cursive; font-size: 20pt; font-weight: 400; letter-spacing: 0.03em; margin: 16pt 0 8pt; border-bottom: 2px solid #111111; padding-bottom: 4pt; color: #111111; }
+  html, body {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: #FFFDF5;
+  }
+  body {
+    font-family: 'Merriweather', Georgia, serif; font-size: 11pt; line-height: 1.75; color: #111111;
+  }
+  h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 16pt 0 10pt; color: #111111; }
+  h2 { font-family: 'Bangers', cursive; font-size: 19pt; font-weight: 400; letter-spacing: 0.03em; margin: 14pt 0 7pt; color: #111111; }
   h3 { font-family: 'Bangers', cursive; font-size: 15pt; font-weight: 400; letter-spacing: 0.03em; margin: 12pt 0 6pt; color: #D95D39; }
   h4 { font-family: 'Special Elite', serif; font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #3F5E4D; }
   p  { margin-bottom: 8pt; orphans: 3; widows: 3; }
@@ -419,12 +455,12 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   li { margin-bottom: 4pt; }
   .todo-list { list-style: none; padding-left: 0; }
   .todo-list li { display: flex; align-items: flex-start; gap: 8px; }
-  table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 2px solid #111111; }
+  table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 2px solid #111111; page-break-inside: avoid; break-inside: avoid; }
   th, td { border: 1px solid #111111; padding: 7pt 10pt; }
   th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 11pt; letter-spacing: 0.04em; }
   tr:nth-child(even) td { background: rgba(243, 233, 210, 0.4); }
   
-  figure.image { box-sizing: border-box; max-width: 100%; margin: 12pt auto; display: table; }
+  figure.image { box-sizing: border-box; max-width: 100%; margin: 12pt auto; display: table; page-break-inside: avoid; break-inside: avoid; }
   figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
   figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111111; }
   img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; }
@@ -444,11 +480,14 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
   .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
 
-  blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; }
+  blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; page-break-inside: avoid; break-inside: avoid; }
   a { color: #D95D39; text-decoration: underline; }
-  pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
+  pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; page-break-inside: avoid; break-inside: avoid; }
   code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
   hr { border: none; height: 3px; background: #111111; margin: 20pt 0; }
+  
+  .page-break { page-break-after: always; break-after: page; height: 0; margin: 0; border: none; }
+  .page-boundary-marker, .page-boundary-badge { display: none !important; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 
@@ -463,9 +502,15 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
       pdfOptions: {
         width: `${numW}mm`,
         height: `${numH}mm`,
-        landscape: false, // As dimensões já refletem com precisão a largura e altura da página
+        landscape: false,
         printBackground: true,
-        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+        preferCSSPageSize: true, // Obedece com precisão o @page { margin: ... } da folha de estilo
+        margin: {
+          top: '0mm',
+          right: '0mm',
+          bottom: '0mm',
+          left: '0mm',
+        },
       },
     });
 
@@ -490,7 +535,20 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
 });
 
 app.post('/api/export/img', exportLimiter, async (req, res) => {
-  const { html = '', pageWidth = 210, pageHeight = 297 } = req.body;
+  const {
+    html = '',
+    pageWidth = 210,
+    pageHeight = 297,
+    marginTop,
+    marginBottom,
+    marginLeft,
+    marginRight,
+    margin_top_mm,
+    margin_bottom_mm,
+    margin_left_mm,
+    margin_right_mm
+  } = req.body;
+
   const inlinedHtml = inlineLocalImages(html);
   const cleanHtml   = sanitize(inlinedHtml);
   const numW = Math.max(10, parseFloat(pageWidth) || 210);
@@ -498,8 +556,16 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
   const MM_TO_PX    = 3.7795275591;
   const vpW = Math.round(numW * MM_TO_PX);
   const vpH = Math.round(numH * MM_TO_PX);
-  const padV = Math.round(Math.min(25, Math.max(4, numH * 0.08)) * MM_TO_PX);
-  const padH = Math.round(Math.min(20, Math.max(4, numW * 0.08)) * MM_TO_PX);
+
+  const topVal = (marginTop !== undefined ? marginTop : margin_top_mm);
+  const btmVal = (marginBottom !== undefined ? marginBottom : margin_bottom_mm);
+  const lftVal = (marginLeft !== undefined ? marginLeft : margin_left_mm);
+  const rgtVal = (marginRight !== undefined ? marginRight : margin_right_mm);
+
+  const padTopPx = Math.round(((topVal !== undefined && topVal !== null && topVal !== '') ? Math.max(0, parseFloat(topVal)) : Math.min(25, Math.max(4, numH * 0.08))) * MM_TO_PX);
+  const padBtmPx = Math.round(((btmVal !== undefined && btmVal !== null && btmVal !== '') ? Math.max(0, parseFloat(btmVal)) : Math.min(25, Math.max(4, numH * 0.08))) * MM_TO_PX);
+  const padLftPx = Math.round(((lftVal !== undefined && lftVal !== null && lftVal !== '') ? Math.max(0, parseFloat(lftVal)) : Math.min(20, Math.max(4, numW * 0.08))) * MM_TO_PX);
+  const padRgtPx = Math.round(((rgtVal !== undefined && rgtVal !== null && rgtVal !== '') ? Math.max(0, parseFloat(rgtVal)) : Math.min(20, Math.max(4, numW * 0.08))) * MM_TO_PX);
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
@@ -510,11 +576,11 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
   html, body { width: ${vpW}px; min-height: ${vpH}px; margin: 0; padding: 0; }
   body {
     font-family: 'Merriweather', Georgia, serif; font-size: 11pt; line-height: 1.75; color: #111111;
-    width: ${vpW}px; min-height: ${vpH}px; padding: ${padV}px ${padH}px;
+    width: ${vpW}px; min-height: ${vpH}px; padding: ${padTopPx}px ${padRgtPx}px ${padBtmPx}px ${padLftPx}px;
     background: #FFFDF5; position: relative; overflow: hidden;
   }
   h1 { font-family: 'Bangers', cursive; font-size: 28pt; margin-bottom: 12pt; text-transform: uppercase; }
-  h2 { font-family: 'Bangers', cursive; font-size: 20pt; border-bottom: 2px solid #111; padding-bottom: 4pt; margin: 14pt 0 7pt; }
+  h2 { font-family: 'Bangers', cursive; font-size: 20pt; margin: 14pt 0 7pt; }
   p  { margin-bottom: 8pt; }
   table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 2px solid #111; }
   th, td { border: 1px solid #111; padding: 7pt 10pt; }
@@ -541,6 +607,7 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
   .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
 
   blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
+  .page-boundary-marker, .page-boundary-badge { display: none !important; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 

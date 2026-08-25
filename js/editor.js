@@ -175,10 +175,12 @@ const EditorApp = (() => {
         _instance.model.document.on('change:data', () => {
           _scheduleWordCount();
           _scheduleAutosave();
+          window.PageFormats?.updatePageBoundaries();
         });
 
         window.MediaLibrary?.init(_instance);
         _scheduleWordCount();
+        setTimeout(() => window.PageFormats?.updatePageBoundaries(), 100);
 
         console.log('✅ [EditorApp] CKEditor 5 montado com link popover e preview interativo!');
         return _instance;
@@ -697,8 +699,16 @@ const EditorApp = (() => {
     const temp = document.createElement('div');
     temp.innerHTML = rawHtml.trim();
 
-    // 1. Remove artefatos de UI de redimensionamento e balões
-    temp.querySelectorAll('#img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator, .resizer-toolbar, .resizer-handle, .resizer-move-handle, .resizer-badge, .link-preview-balloon, .toolbar-link-popover').forEach(el => el.remove());
+    // 1. Remove artefatos de UI de redimensionamento, balões e divisores de paginação
+    temp.querySelectorAll(`
+      #img-resizer-overlay, .img-resizer-overlay, #img-drop-indicator, .img-drop-indicator,
+      .resizer-toolbar, .resizer-handle, .resizer-move-handle, .resizer-badge,
+      .link-preview-balloon, .toolbar-link-popover,
+      .multi-page-break, .page-guide-box, .page-boundary-marker, .page-boundary-badge,
+      .page-break-margin-bottom, .page-break-desk-gap, .page-break-margin-top, .page-margin-tag
+    `).forEach(el => el.remove());
+
+    temp.querySelectorAll('.page-first-element').forEach(el => el.classList.remove('page-first-element'));
 
     // 2. Desaninha recursivamente wrappers externos #editor / .ck-content / .ck-editor__editable
     let changed = true;
@@ -764,6 +774,7 @@ const EditorApp = (() => {
     }
 
     _scheduleWordCount();
+    setTimeout(() => window.PageFormats?.updatePageBoundaries?.(), 50);
     const ind = document.getElementById('save-indicator');
     if (ind) {
       ind.textContent = '💾 Pronto';

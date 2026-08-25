@@ -1,13 +1,15 @@
 /**
  * page-formats.js
  * Sistema central de formatos de página — presets ISO/Norte-Americano + tamanhos customizados
+ * Gerenciador de Margens com Margens Independentes para Cada Folha (Top/Bottom/Left/Right)
+ * Motor de Paginação Visual Multi-Folhas com Vão de Mesa e Margens por Folha (O(1) RAM)
  * Editor Web de Documentos — "The Midnight Bat-Tortoise" Edition
  */
 
 const PageFormats = (() => {
 
   /* ──────────────────────────────────────────────────────────
-     PRESETS (todas as medidas em mm)
+     PRESETS DE PÁGINA (todas as medidas em mm)
   ────────────────────────────────────────────────────────── */
   const PRESETS = {
     'A3':      { width: 297, height: 420 },
@@ -30,19 +32,40 @@ const PageFormats = (() => {
   };
 
   /* ──────────────────────────────────────────────────────────
+     PRESETS DE MARGEM (todas as medidas em mm)
+  ────────────────────────────────────────────────────────── */
+  const MARGIN_PRESETS = {
+    'normal':   { name: 'Normal', top: 25, bottom: 25, left: 20, right: 20 },
+    'narrow':   { name: 'Estreita', top: 12.7, bottom: 12.7, left: 12.7, right: 12.7 },
+    'moderate': { name: 'Moderada', top: 25.4, bottom: 25.4, left: 19.0, right: 19.0 },
+    'wide':     { name: 'Larga', top: 25.4, bottom: 25.4, left: 50.8, right: 50.8 },
+    'zero':     { name: 'Sem Margem', top: 0, bottom: 0, left: 0, right: 0 },
+  };
+
+  /* ──────────────────────────────────────────────────────────
      Configurações de armazenamento
   ────────────────────────────────────────────────────────── */
   const KEYS = {
-    FORMAT:    'wm_page_format',
-    LANDSCAPE: 'wm_landscape',
-    CUSTOMS:   'wm_custom_formats',
+    FORMAT:           'wm_page_format',
+    LANDSCAPE:        'wm_landscape',
+    CUSTOMS:          'wm_custom_formats',
+    MARGINS:          'wm_page_margins',
+    PAGE_MARGINS_MAP: 'wm_page_margins_map',
+    SHOW_GUIDES:      'wm_show_margin_guides',
   };
 
   /* ──────────────────────────────────────────────────────────
      Estado interno
   ────────────────────────────────────────────────────────── */
-  let _currentName = 'A4';
-  let _isLandscape = false;
+  let _currentName     = 'A4';
+  let _isLandscape     = false;
+  let _margins         = { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' };
+  let _pageMarginsMap  = { 1: { top: 25, bottom: 25, left: 20, right: 20, name: 'Normal' } };
+  let _showGuides      = false;
+  let _pageHeightMm    = 297;
+  let _pageWidthMm     = 210;
+  let _totalPages      = 1;
+  let _debounceTimer   = null;
 
   /* ──────────────────────────────────────────────────────────
      Helpers de conversão de unidades → mm
@@ -97,17 +120,217 @@ const PageFormats = (() => {
   ────────────────────────────────────────────────────────── */
   function _applyCSS(widthMm, heightMm) {
     const root = document.documentElement;
+    _pageWidthMm  = widthMm;
+    _pageHeightMm = heightMm;
+
     root.style.setProperty('--page-width',  `${widthMm}mm`);
     root.style.setProperty('--page-height', `${heightMm}mm`);
+
+    _applyMarginCSS();
+    updatePageBoundaries();
+  }
+
+  function _applyMarginCSS() {
+    const root = document.documentElement;
+    const p1Margins = getPageMargins(1);
+    root.style.setProperty('--page-margin-top',    `${p1Margins.top}mm`);
+    root.style.setProperty('--page-margin-bottom', `${p1Margins.bottom}mm`);
+    root.style.setProperty('--page-margin-left',   `${p1Margins.left}mm`);
+    root.style.setProperty('--page-margin-right',  `${p1Margins.right}mm`);
+    // Aliases para compatibilidade retroativa
+    root.style.setProperty('--page-pad-v', `${p1Margins.top}mm`);
+    root.style.setProperty('--page-pad-h', `${p1Margins.left}mm`);
+
+    const sheet = document.getElementById('page-sheet');
+    if (sheet) {
+      sheet.classList.toggle('show-guides', _showGuides);
+    }
   }
 
   /* ──────────────────────────────────────────────────────────
-     Emitir evento global de mudança de formato
+     Emitir eventos globais
   ────────────────────────────────────────────────────────── */
   function _emit(name, width, height) {
     window.dispatchEvent(new CustomEvent('pageFormatChanged', {
-      detail: { name, width, height, landscape: _isLandscape }
+      detail: {
+        name,
+        width,
+        height,
+        landscape: _isLandscape,
+        margins: { ..._margins },
+        pageMarginsMap: { ..._pageMarginsMap },
+        totalPages: _totalPages
+      }
     }));
+  }
+
+  function _emitMargins() {
+    window.dispatchEvent(new CustomEvent('pageMarginsChanged', {
+      detail: {
+        margins: { ..._margins },
+        pageMarginsMap: { ..._pageMarginsMap }
+      }
+    }));
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     MOTOR DE PAGINAÇÃO VISUAL COM MARGENS INDEPENDENTES POR FOLHA
+  ══════════════════════════════════════════════════════════ */
+  function updatePageBoundaries() {
+    if (_debounceTimer) clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(_calculateAndRenderPages, 50);
+  }
+
+  function _calculateAndRenderPages() {
+    const sheet = document.getElementById('page-sheet');
+    const editor = document.getElementById('editor') || document.querySelector('.ck-editor__editable');
+    if (!sheet || !editor) return;
+
+    const MM_TO_PX = 3.7795275591;
+    const pageHeightPx = _pageHeightMm * MM_TO_PX;
+    if (pageHeightPx < 50) return;
+
+    // Remove divisores anteriores e caixas de guia
+    sheet.querySelectorAll('.multi-page-break, .page-guide-box').forEach(el => el.remove());
+
+    const children = Array.from(editor.children);
+    // Remove classes e estilos anteriores para medição fiel
+    children.forEach(el => {
+      el.classList.remove('page-first-element');
+      el.style.removeProperty('margin-top');
+      el.style.removeProperty('margin-left');
+      el.style.removeProperty('margin-right');
+    });
+
+    let currentPage = 1;
+    let currentMargins = getPageMargins(currentPage);
+    let usableHeightMm = Math.max(20, _pageHeightMm - (currentMargins.top + currentMargins.bottom));
+    let usableHeightPx = usableHeightMm * MM_TO_PX;
+
+    let currentAccumHeightPx = 0;
+    const breaks = [];
+    const baseMargins = getPageMargins(1);
+
+    // Itera pelos blocos de conteúdo para detectar quando ultrapassam a margem inferior da folha atual
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (child.classList.contains('multi-page-break') || child.classList.contains('page-boundary-marker') || child.id === 'img-resizer-overlay') continue;
+
+      const childHeight = child.offsetHeight || 24;
+
+      // Se este elemento faz o conteúdo ultrapassar a área útil da página atual:
+      if (currentAccumHeightPx > 0 && (currentAccumHeightPx + childHeight) > (usableHeightPx + 4)) {
+        const prevPage = currentPage;
+        const prevMargins = currentMargins;
+        currentPage++;
+        currentMargins = getPageMargins(currentPage);
+        usableHeightMm = Math.max(20, _pageHeightMm - (currentMargins.top + currentMargins.bottom));
+        usableHeightPx = usableHeightMm * MM_TO_PX;
+
+        child.classList.add('page-first-element');
+        child.style.marginTop = `calc(${prevMargins.bottom}mm + 36px + ${currentMargins.top}mm)`;
+        
+        // Ajusta recuo lateral se a margem desta folha diferir da Folha 1
+        if (currentMargins.left !== baseMargins.left || currentMargins.right !== baseMargins.right) {
+          const deltaLeft = currentMargins.left - baseMargins.left;
+          const deltaRight = currentMargins.right - baseMargins.right;
+          child.style.marginLeft = `${deltaLeft}mm`;
+          child.style.marginRight = `${deltaRight}mm`;
+        }
+
+        currentAccumHeightPx = childHeight;
+        breaks.push({ page: currentPage, targetEl: child, prevMargins, currMargins: currentMargins });
+      } else {
+        if (currentPage > 1 && (currentMargins.left !== baseMargins.left || currentMargins.right !== baseMargins.right)) {
+          const deltaLeft = currentMargins.left - baseMargins.left;
+          const deltaRight = currentMargins.right - baseMargins.right;
+          child.style.marginLeft = `${deltaLeft}mm`;
+          child.style.marginRight = `${deltaRight}mm`;
+        }
+        currentAccumHeightPx += childHeight;
+      }
+    }
+
+    _totalPages = currentPage;
+
+    // Renderiza divisores visuais para cada transição de página
+    if (currentPage > 1) {
+      const DESK_GAP_PX = 36;
+      const DESK_GAP_MM = DESK_GAP_PX / MM_TO_PX;
+      const totalSheetHeightMm = currentPage * _pageHeightMm + (currentPage - 1) * DESK_GAP_MM;
+      sheet.style.minHeight = `${totalSheetHeightMm}mm`;
+
+      breaks.forEach(({ page, targetEl, prevMargins, currMargins }) => {
+        const breakEl = document.createElement('div');
+        breakEl.className = 'multi-page-break';
+        breakEl.innerHTML = `
+          <!-- Rodapé com Margem Inferior da Folha Anterior -->
+          <div class="page-break-margin-bottom" style="height: ${prevMargins.bottom}mm;">
+            <span class="page-margin-tag">Margem Inferior (${prevMargins.bottom}mm) · Fim da Folha ${page - 1}</span>
+          </div>
+
+          <!-- Vão Físico da Mesa de Trabalho com Botão de Configuração Rápida de Margem -->
+          <div class="page-break-desk-gap">
+            <div class="multi-page-break-label">
+              <span>📄 Folha ${page} de ${_totalPages}</span>
+            </div>
+            <button type="button" class="page-break-margin-btn" onclick="App.openMarginsModal(${page})" title="Configurar margens da Folha ${page}">
+              ⚙️ Margens da Folha ${page} (${currMargins.name || 'Personalizada'})
+            </button>
+            <span class="multi-page-break-tag">✂️ Início da Folha ${page} (${_pageWidthMm}×${_pageHeightMm}mm)</span>
+          </div>
+
+          <!-- Cabeçalho com Margem Superior da Nova Folha -->
+          <div class="page-break-margin-top" style="height: ${currMargins.top}mm;">
+            <span class="page-margin-tag">Margem Superior (${currMargins.top}mm) · Área Útil da Folha ${page}</span>
+          </div>
+        `;
+        const elTop = targetEl.offsetTop;
+        const breakHeightPx = (prevMargins.bottom + currMargins.top) * MM_TO_PX + DESK_GAP_PX;
+        breakEl.style.top = `${elTop - breakHeightPx}px`;
+        breakEl.style.height = `${breakHeightPx}px`;
+        sheet.appendChild(breakEl);
+      });
+    } else {
+      sheet.style.minHeight = `${_pageHeightMm}mm`;
+    }
+
+    // Se as linhas-guia estiverem ativadas, desenha a moldura de cada folha independente
+    if (_showGuides) {
+      const DESK_GAP_MM = 36 / MM_TO_PX;
+      for (let p = 1; p <= _totalPages; p++) {
+        const pMargins = getPageMargins(p);
+        const pUsableHeightMm = Math.max(20, _pageHeightMm - (pMargins.top + pMargins.bottom));
+        const pageTopMm = (p - 1) * (_pageHeightMm + DESK_GAP_MM);
+        const guideBox = document.createElement('div');
+        guideBox.className = 'page-guide-box';
+        guideBox.style.top    = `${pageTopMm + pMargins.top}mm`;
+        guideBox.style.height = `${pUsableHeightMm}mm`;
+        guideBox.style.left   = `${pMargins.left}mm`;
+        guideBox.style.right  = `${pMargins.right}mm`;
+        sheet.appendChild(guideBox);
+      }
+    }
+
+    // Atualiza contador de páginas na barra de status
+    const statusPageEl = document.getElementById('page-count-status') || document.getElementById('page-dimensions');
+    if (statusPageEl) {
+      const cur = getCurrent();
+      const dimsText = `${Math.round(cur.width)} × ${Math.round(cur.height)} mm`;
+      const pagesText = _totalPages > 1 ? ` · ${_totalPages} páginas` : ' · 1 página';
+      statusPageEl.textContent = `${dimsText}${pagesText}`;
+    }
+
+    // Atualiza chip de formato no header
+    const chip = document.getElementById('format-chip');
+    if (chip) {
+      const cur = getCurrent();
+      const w = Math.round(cur.width);
+      const h = Math.round(cur.height);
+      const mName = _margins.name || 'Normal';
+      const pText = _totalPages > 1 ? ` · ${_totalPages} págs` : '';
+      chip.textContent = `${cur.name} · ${w}×${h}mm · ${mName}${pText}`;
+    }
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -115,19 +338,43 @@ const PageFormats = (() => {
   ══════════════════════════════════════════════════════════ */
 
   /**
-   * Inicializa o sistema — restaura o último formato usado.
+   * Inicializa o sistema — restaura o último formato e margens usados.
    */
   function init() {
     const savedName      = localStorage.getItem(KEYS.FORMAT)    || 'A4';
     const savedLandscape = localStorage.getItem(KEYS.LANDSCAPE) === 'true';
     _isLandscape = savedLandscape;
+
+    try {
+      const savedMargins = JSON.parse(localStorage.getItem(KEYS.MARGINS) || 'null');
+      if (savedMargins && typeof savedMargins.top === 'number') {
+        _margins = savedMargins;
+      }
+      const savedMap = JSON.parse(localStorage.getItem(KEYS.PAGE_MARGINS_MAP) || 'null');
+      if (savedMap && typeof savedMap === 'object') {
+        _pageMarginsMap = savedMap;
+      } else {
+        _pageMarginsMap = { 1: { ..._margins } };
+      }
+    } catch {}
+
+    _showGuides = localStorage.getItem(KEYS.SHOW_GUIDES) === 'true';
+
     applyFormat(savedName, false);
+    _applyMarginCSS();
+
+    // Observador inteligente com ResizeObserver para atualizar divisores de página em tempo real
+    const editorEl = document.getElementById('editor');
+    if (editorEl && window.ResizeObserver) {
+      const ro = new ResizeObserver(() => {
+        updatePageBoundaries();
+      });
+      ro.observe(editorEl);
+    }
   }
 
   /**
    * Aplica um formato pré-definido ou customizado pelo nome.
-   * @param {string} name  — nome do formato
-   * @param {boolean} emit — disparar evento (default: true)
    */
   function applyFormat(name, emit = true) {
     const fmt = _resolve(name);
@@ -150,7 +397,6 @@ const PageFormats = (() => {
 
   /**
    * Aplica um tamanho customizado sem salvar como formato permanente.
-   * Útil para preview em tempo real no modal.
    */
   function previewCustom(widthVal, heightVal, unit = 'mm') {
     const w = toMm(widthVal, unit);
@@ -160,8 +406,7 @@ const PageFormats = (() => {
   }
 
   /**
-   * Aplica e registra um tamanho customizado (com ou sem nome permanente).
-   * Garante que getCurrent() retorne exatamente a largura e altura definidas.
+   * Aplica e registra um tamanho customizado.
    */
   function applyCustom(widthVal, heightVal, unit = 'mm', customName = null) {
     const w = Math.round(toMm(widthVal, unit));
@@ -173,7 +418,6 @@ const PageFormats = (() => {
       name = `${w}×${h}mm`;
     }
 
-    // Salva nos formatos customizados do usuário
     const customs = _getCustoms();
     customs[name] = { width: w, height: h };
     _saveCustoms(customs);
@@ -192,9 +436,6 @@ const PageFormats = (() => {
     return { name, width: finalW, height: finalH };
   }
 
-  /**
-   * Aplica e salva um formato customizado.
-   */
   function saveAndApplyCustom(name, widthVal, heightVal, unit = 'mm') {
     const trimmed = (name || '').trim();
     if (!trimmed) throw new Error('Informe um nome para o formato.');
@@ -202,9 +443,6 @@ const PageFormats = (() => {
     return applyCustom(widthVal, heightVal, unit, trimmed);
   }
 
-  /**
-   * Remove um formato customizado.
-   */
   function deleteCustomFormat(name) {
     const customs = _getCustoms();
     delete customs[name];
@@ -213,9 +451,6 @@ const PageFormats = (() => {
     if (_currentName === name) applyFormat('A4');
   }
 
-  /**
-   * Alterna entre orientação Retrato e Paisagem.
-   */
   function toggleOrientation() {
     _isLandscape = !_isLandscape;
     localStorage.setItem(KEYS.LANDSCAPE, _isLandscape);
@@ -223,9 +458,95 @@ const PageFormats = (() => {
     return _isLandscape;
   }
 
-  /**
-   * Retorna todos os formatos disponíveis (presets + customizados).
-   */
+  /* ══════════════════════════════════════════════════════════
+     GERENCIAMENTO DE MARGENS (Global e por Folha Individual)
+  ══════════════════════════════════════════════════════════ */
+  function getMargins(pageIndex = 1) {
+    return getPageMargins(pageIndex);
+  }
+
+  function getPageMargins(pageIndex = 1) {
+    const idx = parseInt(pageIndex, 10) || 1;
+    if (_pageMarginsMap && _pageMarginsMap[idx] && typeof _pageMarginsMap[idx].top === 'number') {
+      return { ..._pageMarginsMap[idx] };
+    }
+    return { ..._margins };
+  }
+
+  function getPageMarginsMap() {
+    return { ..._pageMarginsMap };
+  }
+
+  function applyMargins(top, bottom, left, right, name = 'Personalizada', save = true, targetPage = 'all') {
+    const numTop    = Math.max(0, parseFloat(top) || 0);
+    const numBottom = Math.max(0, parseFloat(bottom) || 0);
+    const numLeft   = Math.max(0, parseFloat(left) || 0);
+    const numRight  = Math.max(0, parseFloat(right) || 0);
+
+    const newMargin = {
+      top: numTop,
+      bottom: numBottom,
+      left: numLeft,
+      right: numRight,
+      name: name || 'Personalizada'
+    };
+
+    if (targetPage === 'all' || targetPage === 'Todas' || !targetPage) {
+      _margins = { ...newMargin };
+      _pageMarginsMap = { 1: { ...newMargin } };
+    } else {
+      const pageNum = parseInt(targetPage, 10) || 1;
+      _pageMarginsMap[pageNum] = { ...newMargin };
+      if (pageNum === 1) {
+        _margins = { ...newMargin };
+      }
+    }
+
+    _applyMarginCSS();
+    updatePageBoundaries();
+
+    if (save) {
+      try {
+        localStorage.setItem(KEYS.MARGINS, JSON.stringify(_margins));
+        localStorage.setItem(KEYS.PAGE_MARGINS_MAP, JSON.stringify(_pageMarginsMap));
+      } catch {}
+    }
+
+    _emitMargins();
+    return { ...newMargin };
+  }
+
+  function applyMarginPreset(presetKey, targetPage = 'all') {
+    const preset = MARGIN_PRESETS[presetKey];
+    if (!preset) return;
+    return applyMargins(preset.top, preset.bottom, preset.left, preset.right, preset.name, true, targetPage);
+  }
+
+  function setPageMargins(pageNum, marginsObj, save = true) {
+    if (!marginsObj) return;
+    return applyMargins(
+      marginsObj.top,
+      marginsObj.bottom,
+      marginsObj.left,
+      marginsObj.right,
+      marginsObj.name || 'Personalizada',
+      save,
+      pageNum
+    );
+  }
+
+  function toggleMarginGuides() {
+    _showGuides = !_showGuides;
+    try { localStorage.setItem(KEYS.SHOW_GUIDES, _showGuides ? 'true' : 'false'); } catch {}
+    _applyMarginCSS();
+    updatePageBoundaries();
+    return _showGuides;
+  }
+
+  function isShowingGuides() {
+    return _showGuides;
+  }
+
   function getAllFormats() {
     return {
       presets: PRESETS,
@@ -234,9 +555,6 @@ const PageFormats = (() => {
     };
   }
 
-  /**
-   * Retorna o estado atual do formato ativo (sempre com largura e altura exatas em mm).
-   */
   function getCurrent() {
     const fmt = _resolve(_currentName) || PRESETS['A4'];
     let { width, height } = fmt;
@@ -245,25 +563,37 @@ const PageFormats = (() => {
       name: _currentName,
       width: Math.round(width * 10) / 10,
       height: Math.round(height * 10) / 10,
-      landscape: _isLandscape
+      landscape: _isLandscape,
+      margins: { ..._margins },
+      pageMarginsMap: { ..._pageMarginsMap },
+      totalPages: _totalPages
     };
   }
 
-  /**
-   * Retorna o label legível de um formato.
-   */
   function getLabel(name) {
     const fmt = _resolve(name);
     if (!fmt) return name;
     return `${name} · ${fmt.width}×${fmt.height}mm`;
   }
 
-  /**
-   * Define o formato e a orientação simultaneamente (usado na troca de abas/projetos).
-   */
-  function setFormatAndOrientation(name, isLandscape = false) {
+  function getTotalPages() {
+    return _totalPages;
+  }
+
+  function setFormatAndOrientation(name, isLandscape = false, customMargins = null, pageMarginsMap = null) {
     _isLandscape = !!isLandscape;
     localStorage.setItem(KEYS.LANDSCAPE, _isLandscape);
+    if (customMargins && typeof customMargins.top === 'number') {
+      _margins = { ...customMargins };
+      _pageMarginsMap = (pageMarginsMap && typeof pageMarginsMap === 'object')
+        ? { ...pageMarginsMap }
+        : { 1: { ...customMargins } };
+      _applyMarginCSS();
+    } else if (pageMarginsMap && typeof pageMarginsMap === 'object') {
+      _pageMarginsMap = { ...pageMarginsMap };
+      if (_pageMarginsMap[1]) _margins = { ..._pageMarginsMap[1] };
+      _applyMarginCSS();
+    }
     applyFormat(name || 'A4', true);
     const btn = document.getElementById('orientation-btn');
     if (btn) btn.classList.toggle('landscape', _isLandscape);
@@ -279,11 +609,22 @@ const PageFormats = (() => {
     saveAndApplyCustom,
     deleteCustomFormat,
     toggleOrientation,
+    getMargins,
+    getPageMargins,
+    getPageMarginsMap,
+    setPageMargins,
+    applyMargins,
+    applyMarginPreset,
+    toggleMarginGuides,
+    isShowingGuides,
+    updatePageBoundaries,
+    getTotalPages,
     getAllFormats,
     getCurrent,
     getLabel,
     PRESETS,
     GROUPS,
+    MARGIN_PRESETS,
     toMm,
   };
 
