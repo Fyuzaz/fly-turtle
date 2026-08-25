@@ -783,7 +783,10 @@
 }
 
 /* Guias de Margem Visuais (Toggle) */
-#page-sheet.show-guides::before {
+/* O ::before só mostra a guia da Folha 1 em doc de página única.
+   Em multi-folhas, o JS injeta .page-guide-box individuais — o ::before
+   é suprimido com a classe has-guide-boxes para evitar sobreposição. */
+#page-sheet.show-guides:not(.has-guide-boxes)::before {
   content: '';
   position: absolute;
   top: var(--page-margin-top, 25mm);
@@ -1008,10 +1011,13 @@
   border-radius: 2px;
 }
 
-/* Elemento que inicia em uma nova página (pula a margem inferior da folha anterior, o vão de mesa e a margem superior da nova folha) */
+/* Elemento que inicia em uma nova página.
+   O margin-top EXATO é injetado inline pelo motor JS (page-formats.js)
+   baseado nas margens reais de CADA folha individualmente.
+   NÃO use margin-top aqui — o !important sobrescreveria o valor correto por folha. */
 .page-first-element {
-  margin-top: calc(var(--page-margin-bottom, 25mm) + 36px + var(--page-margin-top, 25mm)) !important;
   position: relative;
+  /* margin-top é definido exclusivamente via el.style.marginTop pelo motor JS */
 }
 
 /* ─── CKEditor & Default Editable Area ───────── */

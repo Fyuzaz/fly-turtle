@@ -68,13 +68,18 @@ def mm_to_cm(mm: float) -> float:
 # ── Gera um arquivo DOCX de referência via Pandoc ────────
 def _build_pandoc_args(req: ExportRequest) -> list[str]:
     """
-    Retorna os extra_args para o Pandoc com suporte a margens personalizadas.
+    Retorna os extra_args para o Pandoc com suporte a margens personalizadas e orientação.
     """
     raw_w = req.pageWidth if req.pageWidth is not None else (req.page_width_mm or 210.0)
     raw_h = req.pageHeight if req.pageHeight is not None else (req.page_height_mm or 297.0)
 
     w = float(raw_w)
     h = float(raw_h)
+
+    if req.landscape:
+        w, h = max(w, h), min(w, h)
+    else:
+        w, h = min(w, h), max(w, h)
 
     top_val = req.marginTop if req.marginTop is not None else (req.margin_top_mm if req.margin_top_mm is not None else 25.0)
     btm_val = req.marginBottom if req.marginBottom is not None else (req.margin_bottom_mm if req.margin_bottom_mm is not None else 25.0)
@@ -98,6 +103,19 @@ def _build_pandoc_args(req: ExportRequest) -> list[str]:
     return args
 
 
+import re
+
+def _clean_html_for_docx(html: str) -> str:
+    if not html:
+        return ""
+    # Remove scripts and style tags
+    cleaned = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html, flags=re.IGNORECASE)
+    # Remove UI overlays and badges
+    cleaned = re.sub(r'<div\s+[^>]*class=["\'][^"\']*(?:multi-page-break|page-guide-box|page-boundary-marker|img-resizer-overlay)[^"\']*["\'][^>]*>[\s\S]*?<\/div>', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'<span\s+[^>]*class=["\'][^"\']*(?:multi-page-break-label|multi-page-break-tag|page-margin-tag|page-boundary-badge)[^"\']*["\'][^>]*>[\s\S]*?<\/span>', '', cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
 # ── Rota principal ────────────────────────────────────────
 @app.post(
     "/api/export/docx",
@@ -117,18 +135,23 @@ async def export_docx(req: ExportRequest):
     if req.page_height_mm and req.page_height_mm < 10:
         raise HTTPException(status_code=400, detail="Altura da página inválida (mínimo: 10mm).")
 
+    doc_title = req.docName or req.doc_name or "documento"
+    format_name = req.formatName or req.format_name or "A4"
+
     logger.info(
-        f"Exportando DOCX | Formato: {req.format_name} | "
+        f"Exportando DOCX | Documento: {doc_title} | Formato: {format_name} | "
         f"{req.page_width_mm}×{req.page_height_mm}mm | "
         f"Paisagem: {req.landscape}"
     )
 
+    cleaned_body_html = _clean_html_for_docx(req.html)
+
     # Wraps o HTML com estrutura básica para melhor conversão
     full_html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><title>{req.doc_name or 'Documento'}</title></head>
+<head><meta charset="UTF-8"><title>{doc_title}</title></head>
 <body>
-{req.html}
+{cleaned_body_html}
 </body>
 </html>"""
 
@@ -151,9 +174,11 @@ async def export_docx(req: ExportRequest):
             docx_bytes = f.read()
 
         # Nome seguro para o arquivo
-        safe_name = (req.doc_name or "documento").replace(" ", "_")
+        safe_name = str(doc_title).replace(" ", "_")
         safe_name = "".join(c for c in safe_name if c.isalnum() or c in "-_")[:50] or "documento"
-        filename = f"{safe_name}_{req.format_name}.docx"
+        safe_fmt = str(format_name).replace(" ", "_")
+        safe_fmt = "".join(c for c in safe_fmt if c.isalnum() or c in "-_")[:30] or "A4"
+        filename = f"{safe_name}_{safe_fmt}.docx"
 
         logger.info(f"DOCX gerado com sucesso: {len(docx_bytes)} bytes")
 
@@ -173,13 +198,23 @@ async def export_docx(req: ExportRequest):
             os.unlink(tmp_path)
 
 
+def _get_pandoc_status() -> str:
+    try:
+        return pypandoc.get_pandoc_version()
+    except Exception:
+        try:
+            pypandoc.download_pandoc()
+            return pypandoc.get_pandoc_version()
+        except Exception as e:
+            return f"unavailable: {str(e)}"
+
 # ── Health check ──────────────────────────────────────────
 @app.get("/health", summary="Verificar se o serviço está rodando")
 async def health():
     return {
         "status": "ok",
         "service": "WebDoc DOCX Export",
-        "pandoc_version": pypandoc.get_pandoc_version(),
+        "pandoc_version": _get_pandoc_status(),
     }
 
 

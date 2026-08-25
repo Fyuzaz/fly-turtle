@@ -280,18 +280,25 @@ let _activeRenderCount = 0;
 const MAX_CONCURRENT_RENDERS = 4;
 
 async function getMasterBrowser() {
-  if (!_masterBrowser || !_masterBrowser.isConnected()) {
-    _masterBrowser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-      ],
-    });
+  if (_masterBrowser) {
+    if (!_masterBrowser.isConnected()) {
+      // Fecha a instância morta antes de criar uma nova (evita processos Chrome zumbis)
+      try { await _masterBrowser.close(); } catch {}
+      _masterBrowser = null;
+    } else {
+      return _masterBrowser;
+    }
   }
+  _masterBrowser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+    ],
+  });
   return _masterBrowser;
 }
 
@@ -329,8 +336,8 @@ async function renderWithPuppeteer(fullHtml, options = {}) {
     context = await browser.createIncognitoBrowserContext();
     const page = await context.newPage();
 
-    page.setDefaultNavigationTimeout(15000);
-    page.setDefaultTimeout(15000);
+    page.setDefaultNavigationTimeout(30000);
+    page.setDefaultTimeout(30000);
 
     await page.setRequestInterception(true);
     page.on('request', req => {
@@ -346,7 +353,7 @@ async function renderWithPuppeteer(fullHtml, options = {}) {
       await page.setViewport(options.viewport);
     }
 
-    await page.setContent(fullHtml, { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.setContent(fullHtml, { waitUntil: 'networkidle2', timeout: 30000 });
 
     if (options.type === 'png') {
       return await page.screenshot({ type: 'png', fullPage: true });
@@ -361,155 +368,146 @@ async function renderWithPuppeteer(fullHtml, options = {}) {
 
 /* ══════════════════════════════════════════════════════════
    UTILITÁRIO: EMBUTIR IMAGENS LOCAIS COMO BASE64 PARA PDF/PNG
-══════════════════════════════════════════════════════════ */
-function inlineLocalImages(html) {
-  if (!html) return html;
-  return html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (match, before, src, after) => {
-    try {
-      if (src.startsWith('data:')) return match;
-
-      let localPath = null;
-      if (src.includes('/media/')) {
-        const mediaSub = src.substring(src.indexOf('/media/') + '/media/'.length);
-        const decoded = decodeURIComponent(mediaSub.split('?')[0]);
-        localPath = path.join(MEDIA_ROOT, decoded);
-      }
-
-      if (localPath && fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
-        const buffer = fs.readFileSync(localPath);
-        const mime = _guessMime(localPath);
-        const b64 = `data:${mime};base64,${buffer.toString('base64')}`;
-        return `<img ${before}src="${b64}"${after}>`;
-      }
-    } catch (err) {
-      console.warn('[inlineLocalImages] Erro ao embutir imagem:', err.message);
-    }
-    return match;
-  });
-}
-
-/* ══════════════════════════════════════════════════════════
+═══════════════════════════�/* ══════════════════════════════════════════════════════════
    ROTAS DE EXPORTAÇÃO (PDF / PNG)
 ══════════════════════════════════════════════════════════ */
 app.post('/api/export/pdf', exportLimiter, async (req, res) => {
   const {
     html = '',
-    pageWidth = 210,
+    pageWidth  = 210,
     pageHeight = 297,
-    marginTop,
-    marginBottom,
-    marginLeft,
-    marginRight,
-    margin_top_mm,
-    margin_bottom_mm,
-    margin_left_mm,
-    margin_right_mm
+    landscape  = false,
+    marginTop, marginBottom, marginLeft, marginRight,
+    margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
   } = req.body;
 
   const inlinedHtml = inlineLocalImages(html);
   const cleanHtml   = sanitize(inlinedHtml);
 
-  const numW = Math.max(10, parseFloat(pageWidth) || 210);
+  const numW = Math.max(10, parseFloat(pageWidth)  || 210);
   const numH = Math.max(10, parseFloat(pageHeight) || 297);
+  const pdfW = numW;
+  const pdfH = numH;
 
   const pageMarginsMap = req.body.pageMarginsMap || {};
-  const p1Margin = pageMarginsMap[1] || pageMarginsMap['1'] || {};
+  const p1 = pageMarginsMap[1] || pageMarginsMap['1'] || {};
 
-  const topVal = p1Margin.top !== undefined ? p1Margin.top : (marginTop !== undefined ? marginTop : margin_top_mm);
-  const btmVal = p1Margin.bottom !== undefined ? p1Margin.bottom : (marginBottom !== undefined ? marginBottom : margin_bottom_mm);
-  const lftVal = p1Margin.left !== undefined ? p1Margin.left : (marginLeft !== undefined ? marginLeft : margin_left_mm);
-  const rgtVal = p1Margin.right !== undefined ? p1Margin.right : (marginRight !== undefined ? marginRight : margin_right_mm);
+  const topVal = p1.top !== undefined && p1.top !== null && p1.top !== ''
+    ? p1.top
+    : (marginTop !== undefined && marginTop !== null && marginTop !== '' ? marginTop : (margin_top_mm ?? 25));
 
-  const padTop = (topVal !== undefined && topVal !== null && topVal !== '') ? Math.max(0, parseFloat(topVal)) : 25;
-  const padBtm = (btmVal !== undefined && btmVal !== null && btmVal !== '') ? Math.max(0, parseFloat(btmVal)) : 25;
-  const padLft = (lftVal !== undefined && lftVal !== null && lftVal !== '') ? Math.max(0, parseFloat(lftVal)) : 20;
-  const padRgt = (rgtVal !== undefined && rgtVal !== null && rgtVal !== '') ? Math.max(0, parseFloat(rgtVal)) : 20;
+  const btmVal = p1.bottom !== undefined && p1.bottom !== null && p1.bottom !== ''
+    ? p1.bottom
+    : (marginBottom !== undefined && marginBottom !== null && marginBottom !== '' ? marginBottom : (margin_bottom_mm ?? 25));
 
-  console.log(`[PDF Export] Dimensões: ${numW}x${numH}mm | Margens P1: Top=${padTop}mm, Bottom=${padBtm}mm, Left=${padLft}mm, Right=${padRgt}mm | Folhas no mapa: ${Object.keys(pageMarginsMap).length}`);
+  const lftVal = p1.left !== undefined && p1.left !== null && p1.left !== ''
+    ? p1.left
+    : (marginLeft !== undefined && marginLeft !== null && marginLeft !== '' ? marginLeft : (margin_left_mm ?? 20));
+
+  const rgtVal = p1.right !== undefined && p1.right !== null && p1.right !== ''
+    ? p1.right
+    : (marginRight !== undefined && marginRight !== null && marginRight !== '' ? marginRight : (margin_right_mm ?? 20));
+
+  const padTop = Math.max(0, parseFloat(topVal) || 0);
+  const padBtm = Math.max(0, parseFloat(btmVal) || 0);
+  const padLft = Math.max(0, parseFloat(lftVal) || 0);
+  const padRgt = Math.max(0, parseFloat(rgtVal) || 0);
+
+  console.log(`[PDF Export] ${pdfW}x${pdfH}mm | Margens: Top=${padTop}mm, Bottom=${padBtm}mm, Left=${padLft}mm, Right=${padRgt}mm`);
+
+  const MM_TO_PX = 3.7795275591;
+  const vpW = Math.round(pdfW * MM_TO_PX);
+  const vpH = Math.round(pdfH * MM_TO_PX);
+
+  const fontUrl = `https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap`;
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap');
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  @page {
-    size: ${numW}mm ${numH}mm;
-    margin: ${padTop}mm ${padRgt}mm ${padBtm}mm ${padLft}mm;
-  }
-  html, body {
-    width: 100%;
-    margin: 0;
-    padding: 0;
-    background: #FFFDF5;
-  }
-  body {
-    font-family: 'Merriweather', Georgia, serif; font-size: 11pt; line-height: 1.75; color: #111111;
-  }
-  h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 16pt 0 10pt; color: #111111; }
-  h2 { font-family: 'Bangers', cursive; font-size: 19pt; font-weight: 400; letter-spacing: 0.03em; margin: 14pt 0 7pt; color: #111111; }
-  h3 { font-family: 'Bangers', cursive; font-size: 15pt; font-weight: 400; letter-spacing: 0.03em; margin: 12pt 0 6pt; color: #D95D39; }
-  h4 { font-family: 'Special Elite', serif; font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #3F5E4D; }
-  p  { margin-bottom: 8pt; orphans: 3; widows: 3; }
-  ul, ol { margin: 6pt 0 8pt 24pt; }
-  li { margin-bottom: 4pt; }
-  .todo-list { list-style: none; padding-left: 0; }
-  .todo-list li { display: flex; align-items: flex-start; gap: 8px; }
-  table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 2px solid #111111; page-break-inside: avoid; break-inside: avoid; }
-  th, td { border: 1px solid #111111; padding: 7pt 10pt; }
-  th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 11pt; letter-spacing: 0.04em; }
-  tr:nth-child(even) td { background: rgba(243, 233, 210, 0.4); }
-  
-  figure.image { box-sizing: border-box; max-width: 100%; margin: 12pt auto; display: table; page-break-inside: avoid; break-inside: avoid; }
-  figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
-  figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111111; }
-  img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; }
-  
-  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
-    background: transparent !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  .image-style-align-left  { float: left !important; margin: 8pt 16pt 12pt 0 !important; }
-  .image-style-align-right { float: right !important; margin: 8pt 0 12pt 16pt !important; }
-  .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
-  .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
-
-  blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; page-break-inside: avoid; break-inside: avoid; }
-  a { color: #D95D39; text-decoration: underline; }
-  pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; page-break-inside: avoid; break-inside: avoid; }
-  code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
-  hr { border: none; height: 3px; background: #111111; margin: 20pt 0; }
-  
-  .page-break { page-break-after: always; break-after: page; height: 0; margin: 0; border: none; }
-  .page-boundary-marker, .page-boundary-badge { display: none !important; }
+@import url('${fontUrl}');
+* { box-sizing: border-box; margin: 0; padding: 0; }
+@page {
+  size: ${pdfW}mm ${pdfH}mm;
+  margin: ${padTop}mm ${padRgt}mm ${padBtm}mm ${padLft}mm;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #FFFDF5;
+  color: #111111;
+  font-family: 'Merriweather', Georgia, serif;
+  font-size: 11pt;
+  line-height: 1.75;
+}
+h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 16pt 0 10pt; color: #111111; }
+h2 { font-family: 'Bangers', cursive; font-size: 19pt; font-weight: 400; letter-spacing: 0.03em; margin: 14pt 0 7pt; color: #111111; }
+h3 { font-family: 'Bangers', cursive; font-size: 15pt; font-weight: 400; letter-spacing: 0.03em; margin: 12pt 0 6pt; color: #D95D39; }
+h4 { font-family: 'Special Elite', serif; font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #3F5E4D; }
+p  { margin-bottom: 8pt; orphans: 3; widows: 3; }
+ul, ol { margin: 6pt 0 8pt 24pt; }
+li { margin-bottom: 4pt; }
+.todo-list { list-style: none; padding-left: 0; }
+.todo-list li { display: flex; align-items: flex-start; gap: 8px; }
+table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 2px solid #111111; page-break-inside: avoid; break-inside: avoid; }
+th, td { border: 1px solid #111111; padding: 7pt 10pt; }
+th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 11pt; letter-spacing: 0.04em; }
+tr:nth-child(even) td { background: rgba(243, 233, 210, 0.4); }
+figure.image { box-sizing: border-box; max-width: 100%; margin: 12pt auto; display: table; page-break-inside: avoid; break-inside: avoid; }
+figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
+figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111111; }
+img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; }
+#editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.image-style-align-left  { float: left !important; margin: 8pt 16pt 12pt 0 !important; }
+.image-style-align-right { float: right !important; margin: 8pt 0 12pt 16pt !important; }
+.image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
+.image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
+blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; page-break-inside: avoid; break-inside: avoid; }
+a { color: #D95D39; text-decoration: underline; }
+pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; page-break-inside: avoid; break-inside: avoid; }
+code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
+hr { border: none; height: 3px; background: #111111; margin: 20pt 0; }
+.page-break {
+  page-break-after: always;
+  break-after: page;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: block;
+}
+.page-first-element {
+  margin-top: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+.page-boundary-marker, .page-boundary-badge { display: none !important; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 
   try {
-    const MM_TO_PX = 3.7795275591;
-    const vpW = Math.round(numW * MM_TO_PX);
-    const vpH = Math.round(numH * MM_TO_PX);
-
     const pdf = await renderWithPuppeteer(fullHtml, {
       type: 'pdf',
       viewport: { width: vpW, height: vpH, deviceScaleFactor: 2 },
       pdfOptions: {
-        width: `${numW}mm`,
-        height: `${numH}mm`,
+        width:  `${pdfW}mm`,
+        height: `${pdfH}mm`,
         landscape: false,
         printBackground: true,
-        preferCSSPageSize: true, // Obedece com precisão o @page { margin: ... } da folha de estilo
+        preferCSSPageSize: true,
         margin: {
-          top: '0mm',
-          right: '0mm',
-          bottom: '0mm',
-          left: '0mm',
+          top:    `${padTop}mm`,
+          bottom: `${padBtm}mm`,
+          left:   `${padLft}mm`,
+          right:  `${padRgt}mm`,
         },
       },
     });
@@ -520,11 +518,10 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
     const safeFmt = String(req.body.formatName || req.body.format_name || `${numW}x${numH}mm`)
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 20) || 'formato';
-    const downloadFilename = `${safeDoc}_${safeFmt}.pdf`;
 
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${downloadFilename}"`,
+      'Content-Disposition': `attachment; filename="${safeDoc}_${safeFmt}.pdf"`,
       'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type',
     });
     res.send(pdf);
@@ -537,77 +534,114 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
 app.post('/api/export/img', exportLimiter, async (req, res) => {
   const {
     html = '',
-    pageWidth = 210,
+    pageWidth  = 210,
     pageHeight = 297,
-    marginTop,
-    marginBottom,
-    marginLeft,
-    marginRight,
-    margin_top_mm,
-    margin_bottom_mm,
-    margin_left_mm,
-    margin_right_mm
+    landscape  = false,
+    marginTop, marginBottom, marginLeft, marginRight,
+    margin_top_mm, margin_bottom_mm, margin_left_mm, margin_right_mm,
   } = req.body;
 
   const inlinedHtml = inlineLocalImages(html);
   const cleanHtml   = sanitize(inlinedHtml);
-  const numW = Math.max(10, parseFloat(pageWidth) || 210);
+  const numW = Math.max(10, parseFloat(pageWidth)  || 210);
   const numH = Math.max(10, parseFloat(pageHeight) || 297);
-  const MM_TO_PX    = 3.7795275591;
-  const vpW = Math.round(numW * MM_TO_PX);
-  const vpH = Math.round(numH * MM_TO_PX);
+  const imgW = numW;
+  const imgH = numH;
+  const MM_TO_PX = 3.7795275591;
+  const vpW  = Math.round(imgW * MM_TO_PX);
+  const vpH  = Math.round(imgH * MM_TO_PX);
 
-  const topVal = (marginTop !== undefined ? marginTop : margin_top_mm);
-  const btmVal = (marginBottom !== undefined ? marginBottom : margin_bottom_mm);
-  const lftVal = (marginLeft !== undefined ? marginLeft : margin_left_mm);
-  const rgtVal = (marginRight !== undefined ? marginRight : margin_right_mm);
+  const pageMarginsMap = req.body.pageMarginsMap || {};
+  const p1 = pageMarginsMap[1] || pageMarginsMap['1'] || {};
 
-  const padTopPx = Math.round(((topVal !== undefined && topVal !== null && topVal !== '') ? Math.max(0, parseFloat(topVal)) : Math.min(25, Math.max(4, numH * 0.08))) * MM_TO_PX);
-  const padBtmPx = Math.round(((btmVal !== undefined && btmVal !== null && btmVal !== '') ? Math.max(0, parseFloat(btmVal)) : Math.min(25, Math.max(4, numH * 0.08))) * MM_TO_PX);
-  const padLftPx = Math.round(((lftVal !== undefined && lftVal !== null && lftVal !== '') ? Math.max(0, parseFloat(lftVal)) : Math.min(20, Math.max(4, numW * 0.08))) * MM_TO_PX);
-  const padRgtPx = Math.round(((rgtVal !== undefined && rgtVal !== null && rgtVal !== '') ? Math.max(0, parseFloat(rgtVal)) : Math.min(20, Math.max(4, numW * 0.08))) * MM_TO_PX);
+  const topVal = p1.top !== undefined && p1.top !== null && p1.top !== ''
+    ? p1.top
+    : (marginTop !== undefined && marginTop !== null && marginTop !== '' ? marginTop : (margin_top_mm ?? 25));
+
+  const btmVal = p1.bottom !== undefined && p1.bottom !== null && p1.bottom !== ''
+    ? p1.bottom
+    : (marginBottom !== undefined && marginBottom !== null && marginBottom !== '' ? marginBottom : (margin_bottom_mm ?? 25));
+
+  const lftVal = p1.left !== undefined && p1.left !== null && p1.left !== ''
+    ? p1.left
+    : (marginLeft !== undefined && marginLeft !== null && marginLeft !== '' ? marginLeft : (margin_left_mm ?? 20));
+
+  const rgtVal = p1.right !== undefined && p1.right !== null && p1.right !== ''
+    ? p1.right
+    : (marginRight !== undefined && marginRight !== null && marginRight !== '' ? marginRight : (margin_right_mm ?? 20));
+
+  const padTopPx = Math.round(Math.max(0, parseFloat(topVal) || 0) * MM_TO_PX);
+  const padBtmPx = Math.round(Math.max(0, parseFloat(btmVal) || 0) * MM_TO_PX);
+  const padLftPx = Math.round(Math.max(0, parseFloat(lftVal) || 0) * MM_TO_PX);
+  const padRgtPx = Math.round(Math.max(0, parseFloat(rgtVal) || 0) * MM_TO_PX);
+
+  const fontUrl = `https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap`;
 
   const fullHtml = `<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Bangers&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400..800;1,400..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Special+Elite&display=swap');
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: ${vpW}px; min-height: ${vpH}px; margin: 0; padding: 0; }
-  body {
-    font-family: 'Merriweather', Georgia, serif; font-size: 11pt; line-height: 1.75; color: #111111;
-    width: ${vpW}px; min-height: ${vpH}px; padding: ${padTopPx}px ${padRgtPx}px ${padBtmPx}px ${padLftPx}px;
-    background: #FFFDF5; position: relative; overflow: hidden;
-  }
-  h1 { font-family: 'Bangers', cursive; font-size: 28pt; margin-bottom: 12pt; text-transform: uppercase; }
-  h2 { font-family: 'Bangers', cursive; font-size: 20pt; margin: 14pt 0 7pt; }
-  p  { margin-bottom: 8pt; }
-  table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 2px solid #111; }
-  th, td { border: 1px solid #111; padding: 7pt 10pt; }
-  th { background: #111; color: #F3E9D2; }
-  
-  figure.image { box-sizing: border-box; max-width: 100%; margin: 12px auto; display: table; }
-  figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
-  figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111; }
-  img { max-width: 100%; height: auto; border: 2px solid #111; display: block; }
-  
-  #editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
-    background: transparent !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    border: none !important;
-    box-shadow: none !important;
-  }
-
-  .image-style-align-left  { float: left !important; margin: 8px 16px 12px 0 !important; }
-  .image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
-  .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
-  .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
-
-  blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
-  .page-boundary-marker, .page-boundary-badge { display: none !important; }
+@import url('${fontUrl}');
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  margin: 0;
+  padding: 0;
+  width: ${vpW}px;
+  background: #FFFDF5;
+}
+body {
+  font-family: 'Merriweather', Georgia, serif;
+  font-size: 11pt;
+  line-height: 1.75;
+  color: #111111;
+  padding: ${padTopPx}px ${padRgtPx}px ${padBtmPx}px ${padLftPx}px;
+}
+h1 { font-family: 'Bangers', cursive; font-size: 28pt; margin-bottom: 12pt; }
+h2 { font-family: 'Bangers', cursive; font-size: 20pt; margin: 14pt 0 7pt; }
+h3 { font-family: 'Bangers', cursive; font-size: 15pt; margin: 12pt 0 6pt; color: #D95D39; }
+p  { margin-bottom: 8pt; }
+ul, ol { margin: 6pt 0 8pt 24pt; }
+li { margin-bottom: 4pt; }
+table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 2px solid #111; }
+th, td { border: 1px solid #111; padding: 7pt 10pt; }
+th { background: #111; color: #F3E9D2; }
+figure.image { box-sizing: border-box; max-width: 100%; margin: 12px auto; display: table; }
+figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
+figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111; }
+img { max-width: 100%; height: auto; border: 2px solid #111; display: block; }
+#editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.image-style-align-left  { float: left !important; margin: 8px 16px 12px 0 !important; }
+.image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
+.image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
+.image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
+blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
+a { color: #D95D39; text-decoration: underline; }
+pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
+code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
+hr { border: none; height: 3px; background: #111; margin: 20pt 0; }
+.page-break {
+  page-break-after: always;
+  break-after: page;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: block;
+}
+.page-first-element {
+  margin-top: 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+.page-boundary-marker, .page-boundary-badge { display: none !important; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
 
@@ -623,11 +657,49 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
     const safeFmt = String(req.body.formatName || req.body.format_name || `${numW}x${numH}mm`)
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 20) || 'formato';
-    const downloadFilename = `${safeDoc}_${safeFmt}.png`;
 
     res.set({
       'Content-Type': 'image/png',
-      'Content-Disposition': `attachment; filename="${downloadFilename}"`,
+      'Content-Disposition': `attachment; filename="${safeDoc}_${safeFmt}.png"`,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type',
+    });
+    res.send(png);
+  } catch (err) {
+    console.error('[IMG] Erro de exportação:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});parent !important; padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; border: none !important; box-shadow: none !important; }
+.image-style-align-left  { float: left !important; margin: 8px 16px 12px 0 !important; }
+.image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
+.image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
+.image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
+blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
+a { color: #D95D39; text-decoration: underline; }
+pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
+code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
+hr { border: none; height: 3px; background: #111; margin: 20pt 0; }
+.page-break { display: none !important; }
+.page-first-element { margin-top: 0 !important; }
+.page-boundary-marker, .page-boundary-badge { display: none !important; }
+</style>
+</head><body>${pagesHtml}</body></html>`;
+
+  try {
+    const png = await renderWithPuppeteer(fullHtml, {
+      type: 'png',
+      viewport: { width: vpW, height: vpH, deviceScaleFactor: 2 },
+    });
+
+    const safeDoc = String(req.body.docName || req.body.doc_name || 'documento')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 40) || 'documento';
+    const safeFmt = String(req.body.formatName || req.body.format_name || `${numW}x${numH}mm`)
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 20) || 'formato';
+
+    res.set({
+      'Content-Type': 'image/png',
+      'Content-Disposition': `attachment; filename="${safeDoc}_${safeFmt}.png"`,
       'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type',
     });
     res.send(png);
@@ -636,7 +708,6 @@ app.post('/api/export/img', exportLimiter, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 /* ══════════════════════════════════════════════════════════
    ROTAS DE MÍDIA ISOLADAS POR SESSÃO (Com Suporte Amplo)
 ══════════════════════════════════════════════════════════ */

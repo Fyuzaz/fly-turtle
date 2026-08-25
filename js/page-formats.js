@@ -194,13 +194,7 @@ const PageFormats = (() => {
     sheet.querySelectorAll('.multi-page-break, .page-guide-box').forEach(el => el.remove());
 
     const children = Array.from(editor.children);
-    // Remove classes e estilos anteriores para medição fiel
-    children.forEach(el => {
-      el.classList.remove('page-first-element');
-      el.style.removeProperty('margin-top');
-      el.style.removeProperty('margin-left');
-      el.style.removeProperty('margin-right');
-    });
+    const targetFirstElements = new Map();
 
     let currentPage = 1;
     let currentMargins = getPageMargins(currentPage);
@@ -211,10 +205,41 @@ const PageFormats = (() => {
     const breaks = [];
     const baseMargins = getPageMargins(1);
 
-    // Itera pelos blocos de conteúdo para detectar quando ultrapassam a margem inferior da folha atual
+    // Itera pelos blocos de conteúdo para detectar quebras manuais e overflow natural de folhas
     for (let i = 0; i < children.length; i++) {
       const child = children[i];
       if (child.classList.contains('multi-page-break') || child.classList.contains('page-boundary-marker') || child.id === 'img-resizer-overlay') continue;
+
+      const isExplicitBreak = child.classList.contains('page-break') || 
+                              child.classList.contains('ck-page-break') || 
+                              Boolean(child.querySelector && child.querySelector('.page-break, .ck-page-break'));
+
+      if (isExplicitBreak) {
+        const prevPage = currentPage;
+        const prevMargins = currentMargins;
+        currentPage++;
+        currentMargins = getPageMargins(currentPage);
+        usableHeightMm = Math.max(20, _pageHeightMm - (currentMargins.top + currentMargins.bottom));
+        usableHeightPx = usableHeightMm * MM_TO_PX;
+
+        // O próximo elemento recebe o cabeçalho e espaçamento da nova folha
+        const nextTarget = children[i + 1] || child;
+        const marginTopVal = `calc(${prevMargins.bottom}mm + 36px + ${currentMargins.top}mm)`;
+        let marginLeftVal = '';
+        let marginRightVal = '';
+
+        if (currentMargins.left !== baseMargins.left || currentMargins.right !== baseMargins.right) {
+          const deltaLeft = currentMargins.left - baseMargins.left;
+          const deltaRight = currentMargins.right - baseMargins.right;
+          marginLeftVal = `${deltaLeft}mm`;
+          marginRightVal = `${deltaRight}mm`;
+        }
+
+        targetFirstElements.set(nextTarget, { marginTop: marginTopVal, marginLeft: marginLeftVal, marginRight: marginRightVal });
+        breaks.push({ page: currentPage, targetEl: nextTarget, prevMargins, currMargins: currentMargins });
+        currentAccumHeightPx = 0;
+        continue;
+      }
 
       const childHeight = child.offsetHeight || 24;
 
@@ -227,72 +252,109 @@ const PageFormats = (() => {
         usableHeightMm = Math.max(20, _pageHeightMm - (currentMargins.top + currentMargins.bottom));
         usableHeightPx = usableHeightMm * MM_TO_PX;
 
-        child.classList.add('page-first-element');
-        child.style.marginTop = `calc(${prevMargins.bottom}mm + 36px + ${currentMargins.top}mm)`;
-        
-        // Ajusta recuo lateral se a margem desta folha diferir da Folha 1
+        const marginTopVal = `calc(${prevMargins.bottom}mm + 36px + ${currentMargins.top}mm)`;
+        let marginLeftVal = '';
+        let marginRightVal = '';
+
         if (currentMargins.left !== baseMargins.left || currentMargins.right !== baseMargins.right) {
           const deltaLeft = currentMargins.left - baseMargins.left;
           const deltaRight = currentMargins.right - baseMargins.right;
-          child.style.marginLeft = `${deltaLeft}mm`;
-          child.style.marginRight = `${deltaRight}mm`;
+          marginLeftVal = `${deltaLeft}mm`;
+          marginRightVal = `${deltaRight}mm`;
         }
 
-        currentAccumHeightPx = childHeight;
+        targetFirstElements.set(child, { marginTop: marginTopVal, marginLeft: marginLeftVal, marginRight: marginRightVal });
         breaks.push({ page: currentPage, targetEl: child, prevMargins, currMargins: currentMargins });
+        currentAccumHeightPx = childHeight;
       } else {
         if (currentPage > 1 && (currentMargins.left !== baseMargins.left || currentMargins.right !== baseMargins.right)) {
           const deltaLeft = currentMargins.left - baseMargins.left;
           const deltaRight = currentMargins.right - baseMargins.right;
           child.style.marginLeft = `${deltaLeft}mm`;
           child.style.marginRight = `${deltaRight}mm`;
+        } else {
+          child.style.removeProperty('margin-left');
+          child.style.removeProperty('margin-right');
         }
         currentAccumHeightPx += childHeight;
       }
     }
 
+    // Aplica classes e estilos apenas nos nós pertinentes sem desarmar o layout
+    children.forEach(el => {
+      if (targetFirstElements.has(el)) {
+        const cfg = targetFirstElements.get(el);
+        el.classList.add('page-first-element');
+        el.style.marginTop = cfg.marginTop;
+        if (cfg.marginLeft) el.style.marginLeft = cfg.marginLeft;
+        if (cfg.marginRight) el.style.marginRight = cfg.marginRight;
+      } else {
+        el.classList.remove('page-first-element');
+        el.style.removeProperty('margin-top');
+      }
+    });
+
     _totalPages = currentPage;
 
-    // Renderiza divisores visuais para cada transição de página
+    // Renderiza divisores visuais após o browser reprocessar o layout (evita offsetTop errado)
     if (currentPage > 1) {
       const DESK_GAP_PX = 36;
       const DESK_GAP_MM = DESK_GAP_PX / MM_TO_PX;
       const totalSheetHeightMm = currentPage * _pageHeightMm + (currentPage - 1) * DESK_GAP_MM;
       sheet.style.minHeight = `${totalSheetHeightMm}mm`;
 
-      breaks.forEach(({ page, targetEl, prevMargins, currMargins }) => {
-        const breakEl = document.createElement('div');
-        breakEl.className = 'multi-page-break';
-        breakEl.innerHTML = `
-          <!-- Rodapé com Margem Inferior da Folha Anterior -->
-          <div class="page-break-margin-bottom" style="height: ${prevMargins.bottom}mm;">
-            <span class="page-margin-tag">Margem Inferior (${prevMargins.bottom}mm) · Fim da Folha ${page - 1}</span>
-          </div>
+      // Captura referências antes do rAF para evitar closures obsoletas
+      const breakSnapshot = breaks.slice();
+      const totalPagesSnap = currentPage;
+      const pageWidthSnap = _pageWidthMm;
+      const pageHeightSnap = _pageHeightMm;
 
-          <!-- Vão Físico da Mesa de Trabalho com Botão de Configuração Rápida de Margem -->
-          <div class="page-break-desk-gap">
-            <div class="multi-page-break-label">
-              <span>📄 Folha ${page} de ${_totalPages}</span>
+      requestAnimationFrame(() => {
+        // Remove divisores remanescentes (podem ter sido re-inseridos por rAF duplo)
+        sheet.querySelectorAll('.multi-page-break').forEach(el => el.remove());
+
+        breakSnapshot.forEach(({ page, targetEl, prevMargins, currMargins }) => {
+          const breakEl = document.createElement('div');
+          breakEl.className = 'multi-page-break';
+          breakEl.innerHTML = `
+            <!-- Rodapé com Margem Inferior da Folha Anterior -->
+            <div class="page-break-margin-bottom" style="height: ${prevMargins.bottom}mm;">
+              <span class="page-margin-tag">Margem Inferior (${prevMargins.bottom}mm) · Fim da Folha ${page - 1}</span>
             </div>
-            <button type="button" class="page-break-margin-btn" onclick="App.openMarginsModal(${page})" title="Configurar margens da Folha ${page}">
-              ⚙️ Margens da Folha ${page} (${currMargins.name || 'Personalizada'})
-            </button>
-            <span class="multi-page-break-tag">✂️ Início da Folha ${page} (${_pageWidthMm}×${_pageHeightMm}mm)</span>
-          </div>
 
-          <!-- Cabeçalho com Margem Superior da Nova Folha -->
-          <div class="page-break-margin-top" style="height: ${currMargins.top}mm;">
-            <span class="page-margin-tag">Margem Superior (${currMargins.top}mm) · Área Útil da Folha ${page}</span>
-          </div>
-        `;
-        const elTop = targetEl.offsetTop;
-        const breakHeightPx = (prevMargins.bottom + currMargins.top) * MM_TO_PX + DESK_GAP_PX;
-        breakEl.style.top = `${elTop - breakHeightPx}px`;
-        breakEl.style.height = `${breakHeightPx}px`;
-        sheet.appendChild(breakEl);
+            <!-- Vão Físico da Mesa de Trabalho com Botão de Configuração Rápida de Margem -->
+            <div class="page-break-desk-gap">
+              <div class="multi-page-break-label">
+                <span>📄 Folha ${page} de ${totalPagesSnap}</span>
+              </div>
+              <button type="button" class="page-break-margin-btn" onclick="App.openMarginsModal(${page})" title="Configurar margens da Folha ${page}">
+                ⚙️ Margens da Folha ${page} (${currMargins.name || 'Personalizada'})
+              </button>
+              <span class="multi-page-break-tag">✂️ Início da Folha ${page} (${pageWidthSnap}×${pageHeightSnap}mm)</span>
+            </div>
+
+            <!-- Cabeçalho com Margem Superior da Nova Folha -->
+            <div class="page-break-margin-top" style="height: ${currMargins.top}mm;">
+              <span class="page-margin-tag">Margem Superior (${currMargins.top}mm) · Área Útil da Folha ${page}</span>
+            </div>
+          `;
+          const elTop = targetEl.offsetTop;
+          const breakHeightPx = (prevMargins.bottom + currMargins.top) * MM_TO_PX + DESK_GAP_PX;
+          breakEl.style.top = `${elTop - breakHeightPx}px`;
+          breakEl.style.height = `${breakHeightPx}px`;
+          sheet.appendChild(breakEl);
+        });
+
+        // Adiciona classe has-guide-boxes se houver guias JS (suprime ::before duplicado)
+        if (_showGuides) {
+          sheet.classList.add('has-guide-boxes');
+        } else {
+          sheet.classList.remove('has-guide-boxes');
+        }
       });
     } else {
       sheet.style.minHeight = `${_pageHeightMm}mm`;
+      sheet.classList.remove('has-guide-boxes');
     }
 
     // Se as linhas-guia estiverem ativadas, desenha a moldura de cada folha independente
@@ -492,8 +554,14 @@ const PageFormats = (() => {
     };
 
     if (targetPage === 'all' || targetPage === 'Todas' || !targetPage) {
+      // Aplica em TODAS as folhas já mapeadas, preservando suas chaves.
+      // Se o usuário quiser margem uniforme, todas as folhas recebem o mesmo valor.
       _margins = { ...newMargin };
-      _pageMarginsMap = { 1: { ...newMargin } };
+      const existingKeys = Object.keys(_pageMarginsMap).map(k => parseInt(k, 10)).filter(k => !isNaN(k) && k > 0);
+      if (existingKeys.length === 0) existingKeys.push(1);
+      const updatedMap = {};
+      existingKeys.forEach(k => { updatedMap[k] = { ...newMargin }; });
+      _pageMarginsMap = updatedMap;
     } else {
       const pageNum = parseInt(targetPage, 10) || 1;
       _pageMarginsMap[pageNum] = { ...newMargin };
@@ -576,8 +644,14 @@ const PageFormats = (() => {
     return `${name} · ${fmt.width}×${fmt.height}mm`;
   }
 
-  function getTotalPages() {
+  function updatePageBoundariesSync() {
+    if (_debounceTimer) clearTimeout(_debounceTimer);
+    _calculateAndRenderPages();
     return _totalPages;
+  }
+
+  function getTotalPages() {
+    return updatePageBoundariesSync();
   }
 
   function setFormatAndOrientation(name, isLandscape = false, customMargins = null, pageMarginsMap = null) {
@@ -618,6 +692,7 @@ const PageFormats = (() => {
     toggleMarginGuides,
     isShowingGuides,
     updatePageBoundaries,
+    updatePageBoundariesSync,
     getTotalPages,
     getAllFormats,
     getCurrent,

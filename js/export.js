@@ -10,9 +10,14 @@ const Exporter = (() => {
     ? window.location.origin
     : 'http://localhost:3000';
 
+  // URL do serviço Python — configurável via variável de ambiente ou padrão localhost
+  const PYTHON_SERVICE_URL = (typeof window !== 'undefined' && window.WEBDOC_PYTHON_URL)
+    ? window.WEBDOC_PYTHON_URL
+    : 'http://localhost:8000';
+
   const ENDPOINTS = {
     pdf:  `${origin}/api/export/pdf`,
-    docx: 'http://localhost:8000/api/export/docx',
+    docx: `${PYTHON_SERVICE_URL}/api/export/docx`,
     png:  `${origin}/api/export/img`,
   };
 
@@ -39,9 +44,23 @@ const Exporter = (() => {
       .page-break-margin-bottom, .page-break-desk-gap, .page-break-margin-top, .page-margin-tag
     `).forEach(el => el.remove());
 
-    // Se o elemento tiver classe .page-first-element, remove a margem visual de tela para não distorcer a paginação nativa do PDF/DOCX
+    // Se o elemento tiver classe .page-first-element, remove TODOS os estilos inline
+    // de paginação visual (margin-top, margin-left, margin-right) para não distorcer o PDF/PNG
     clone.querySelectorAll('.page-first-element').forEach(el => {
       el.classList.remove('page-first-element');
+      el.style.removeProperty('margin-top');
+      el.style.removeProperty('margin-left');
+      el.style.removeProperty('margin-right');
+    });
+
+    // Remove também quaisquer estilos inline residuais de paginação em outros elementos
+    clone.querySelectorAll('[style]').forEach(el => {
+      const st = el.style;
+      // Remove margin-top se tiver o padrão de vão de mesa (calc com mm + px)
+      const mt = st.marginTop || '';
+      if (mt.includes('calc') && mt.includes('mm') && mt.includes('px')) {
+        st.removeProperty('margin-top');
+      }
     });
 
     return clone.innerHTML;
@@ -157,11 +176,14 @@ const Exporter = (() => {
      Fallback de DOCX nativo do navegador (Office HTML Word)
   ────────────────────────────────────────────────────────── */
   function _exportHtmlDocx(html, docName, fmt, targetFilename) {
-    const m = fmt.margins || window.PageFormats?.getMargins() || { top: 25, bottom: 25, left: 20, right: 20 };
-    const padTop = Math.max(0, m.top);
-    const padBtm = Math.max(0, m.bottom);
-    const padLft = Math.max(0, m.left);
-    const padRgt = Math.max(0, m.right);
+    // Risk 10 fix: usa pageMarginsMap se disponível para cada página, senão usa margens da Folha 1
+    const baseMargin = fmt.margins || window.PageFormats?.getMargins() || { top: 25, bottom: 25, left: 20, right: 20 };
+    const pagesMap   = window.PageFormats?.getPageMarginsMap?.() || { 1: baseMargin };
+    const m = pagesMap[1] || pagesMap['1'] || baseMargin;
+    const padTop = Math.max(0, parseFloat(m.top)    ?? 25);
+    const padBtm = Math.max(0, parseFloat(m.bottom) ?? 25);
+    const padLft = Math.max(0, parseFloat(m.left)   ?? 20);
+    const padRgt = Math.max(0, parseFloat(m.right)  ?? 20);
     const filename = targetFilename || `${_sanitize(docName)}_${_sanitize(fmt.name)}_${_timestamp()}.doc`;
 
     const header = `<!DOCTYPE html><html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>

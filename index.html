@@ -15,9 +15,9 @@
   <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/super-build/ckeditor.js"></script>
 
   <!-- Estilos -->
-  <link rel="stylesheet" href="css/theme.css?v=3.1" />
-  <link rel="stylesheet" href="css/editor.css?v=3.1" />
-  <link rel="stylesheet" href="css/media-library.css?v=3.1" />
+  <link rel="stylesheet" href="css/theme.css?v=3.2" />
+  <link rel="stylesheet" href="css/editor.css?v=3.2" />
+  <link rel="stylesheet" href="css/media-library.css?v=3.2" />
 </head>
 <body>
 
@@ -487,13 +487,13 @@
 <!-- ═══════════════════════════════════════════════════════
      SCRIPTS
 ════════════════════════════════════════════════════════ -->
-<script src="js/page-formats.js?v=3.3"></script>
-<script src="js/projects-manager.js?v=3.3"></script>
-<script src="js/media-library.js?v=3.3"></script>
-<script src="js/upload-adapter.js?v=3.3"></script>
-<script src="js/image-resizer.js?v=3.3"></script>
-<script src="js/export.js?v=3.3"></script>
-<script src="js/editor.js?v=3.3"></script>
+<script src="js/page-formats.js?v=3.7"></script>
+<script src="js/projects-manager.js?v=3.7"></script>
+<script src="js/media-library.js?v=3.7"></script>
+<script src="js/upload-adapter.js?v=3.7"></script>
+<script src="js/image-resizer.js?v=3.7"></script>
+<script src="js/export.js?v=3.7"></script>
+<script src="js/editor.js?v=3.7"></script>
 
 <script>
 /* ══════════════════════════════════════════════════════════
@@ -534,12 +534,54 @@ const App = (() => {
     window.addEventListener('customFormatsUpdated', () => _buildFormatSelector());
     window.addEventListener('pageMarginsChanged',  () => _updateFormatChip(PageFormats.getCurrent()));
 
-    // Foco automático ao clicar na folha
+    // Foco inteligente ao clicar na folha preservando posição de rolagem
     document.getElementById('page-sheet')?.addEventListener('click', e => {
       if (e.target.id === 'page-sheet') {
+        const workspace = document.getElementById('workspace');
+        const scrollBefore = workspace ? workspace.scrollTop : window.scrollY;
+
         const ed = EditorApp.getInstance();
-        if (ed) ed.editing?.view?.focus();
-        else document.getElementById('editor')?.focus();
+        const editorEl = document.getElementById('editor') || document.querySelector('.ck-editor__editable');
+
+        if (ed) {
+          // Se clicou na folha, tenta posicionar a seleção no parágrafo mais próximo da altura do clique
+          const clickY = e.pageY || (e.clientY + (workspace ? workspace.scrollTop : 0));
+          if (editorEl && editorEl.children.length > 0) {
+            let closestEl = editorEl.firstElementChild;
+            let minDistance = Infinity;
+
+            for (const child of editorEl.children) {
+              if (child.classList.contains('multi-page-break') || child.classList.contains('page-boundary-marker')) continue;
+              const rect = child.getBoundingClientRect();
+              const childY = rect.top + (workspace ? workspace.scrollTop : 0);
+              const dist = Math.abs(childY - clickY);
+              if (dist < minDistance) {
+                minDistance = dist;
+                closestEl = child;
+              }
+            }
+
+            try {
+              const viewItem = ed.editing.view.domConverter.domToView(closestEl);
+              if (viewItem) {
+                const modelItem = ed.editing.mapper.toModelElement(viewItem);
+                if (modelItem) {
+                  ed.model.change(writer => {
+                    writer.setSelection(writer.createPositionAt(modelItem, 'end'));
+                  });
+                }
+              }
+            } catch {}
+          }
+          ed.editing?.view?.focus();
+        } else if (editorEl) {
+          editorEl.focus({ preventScroll: true });
+        }
+
+        // Garante que o scroll permaneça exatamente onde o usuário clicou
+        if (workspace && workspace.scrollTop !== scrollBefore) {
+          workspace.scrollTop = scrollBefore;
+        }
       }
     });
 
@@ -654,7 +696,18 @@ const App = (() => {
     const modal = document.getElementById('margins-modal');
     if (!modal) return;
 
-    const totalPages = PageFormats.getTotalPages() || 1;
+    if (window.PageFormats?.updatePageBoundariesSync) {
+      window.PageFormats.updatePageBoundariesSync();
+    }
+
+    const totalPages = Math.max(1, PageFormats.getTotalPages() || 1);
+    const existingMapKeys = Object.keys(PageFormats.getPageMarginsMap() || {})
+      .map(k => parseInt(k, 10))
+      .filter(n => !isNaN(n) && n > 0);
+
+    const selectedNum = (targetPage !== null && targetPage !== undefined && targetPage !== 'all') ? parseInt(targetPage, 10) : 0;
+    const maxKnownPage = Math.max(totalPages, ...existingMapKeys, selectedNum);
+
     const targetSelect = document.getElementById('margin-target-page');
     if (targetSelect) {
       targetSelect.innerHTML = '';
@@ -663,7 +716,7 @@ const App = (() => {
       optAll.textContent = 'Todas as Folhas do Documento';
       targetSelect.appendChild(optAll);
 
-      for (let p = 1; p <= totalPages; p++) {
+      for (let p = 1; p <= maxKnownPage; p++) {
         const opt = document.createElement('option');
         opt.value = String(p);
         const pMargins = PageFormats.getPageMargins(p);
@@ -671,7 +724,15 @@ const App = (() => {
         targetSelect.appendChild(opt);
       }
 
-      if (targetPage !== null && targetPage !== undefined) {
+      // Opção para adicionar/pré-configurar a próxima folha
+      const nextP = maxKnownPage + 1;
+      const optNext = document.createElement('option');
+      optNext.value = String(nextP);
+      const nextMargins = PageFormats.getPageMargins(nextP);
+      optNext.textContent = `➕ Folha ${nextP} (Nova Folha · ${nextMargins.name || 'Padrão'})`;
+      targetSelect.appendChild(optNext);
+
+      if (targetPage !== null && targetPage !== undefined && targetPage !== 'all') {
         targetSelect.value = String(targetPage);
       } else {
         targetSelect.value = 'all';
@@ -745,22 +806,67 @@ const App = (() => {
 
   function insertPageBreak() {
     const editor = EditorApp.getInstance();
-    const breakHtml = '<div class="page-break"></div><p>&nbsp;</p>';
+
     if (editor) {
-      editor.model.change(writer => {
-        const viewFragment = editor.data.processor.toView(breakHtml);
-        const modelFragment = editor.data.toModel(viewFragment);
-        editor.model.insertContent(modelFragment);
-      });
+      let inserted = false;
+
+      // Tenta o comando nativo de quebra de página do CKEditor (plugin PageBreak)
+      try {
+        if (editor.commands.get('pageBreak')) {
+          editor.execute('pageBreak');
+          inserted = true;
+        }
+      } catch {}
+
+      // Fallback: insere via API de modelo do CKEditor (serializa HTML manualmente)
+      if (!inserted) {
+        try {
+          editor.model.change(writer => {
+            // Insere parágrafo vazio após o cursor como separador de folha
+            const selection = editor.model.document.selection;
+            const currentBlock = selection.getFirstPosition()?.parent;
+            const insertPos = currentBlock
+              ? writer.createPositionAfter(currentBlock)
+              : writer.createPositionAt(editor.model.document.getRoot(), 'end');
+
+            // Inserir elemento de page-break via upcast direto
+            const pageBreakEl = writer.createElement('pageBreak');
+            writer.insert(pageBreakEl, insertPos);
+
+            // Parágrafo vazio depois da quebra para o cursor pousar
+            const emptyParagraph = writer.createElement('paragraph');
+            writer.insertText(' ', emptyParagraph, 0);
+            writer.insert(emptyParagraph, writer.createPositionAfter(pageBreakEl));
+            writer.setSelection(emptyParagraph, 'end');
+          });
+          inserted = true;
+        } catch {}
+      }
+
+      // Último fallback: injeta div.page-break no DOM do editor
+      if (!inserted) {
+        const edEl = document.getElementById('editor') || document.querySelector('.ck-editor__editable');
+        if (edEl) {
+          edEl.insertAdjacentHTML('beforeend', '<div class="page-break"></div><p>&nbsp;</p>');
+        }
+      }
+
       showToast('✂️ Quebra de folha física inserida!', 'success');
     } else {
+      // Modo sem CKEditor: insere diretamente no DOM
       const edEl = document.getElementById('editor');
       if (edEl) {
-        edEl.insertAdjacentHTML('beforeend', breakHtml);
+        edEl.insertAdjacentHTML('beforeend', '<div class="page-break"></div><p>&nbsp;</p>');
         showToast('✂️ Quebra de folha física inserida!', 'success');
       }
     }
-    PageFormats.updatePageBoundaries();
+
+    // Recalcula paginação imediatamente após inserção
+    if (window.PageFormats?.updatePageBoundariesSync) {
+      window.PageFormats.updatePageBoundariesSync();
+    } else {
+      PageFormats.updatePageBoundaries();
+    }
   }
 
   /* ── Modal Tamanho Personalizado ────────────────────────── */
