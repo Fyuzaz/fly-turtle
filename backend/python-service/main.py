@@ -227,28 +227,43 @@ class RichDocxBuilder:
         margin_bottom_mm=25,
         margin_left_mm=20,
         margin_right_mm=20,
+        page_margins_map=None,
         media_root=None,
     ):
         self.doc = docx.Document()
         self.media_root = media_root or MEDIA_ROOT
+        self.page_margins_map = page_margins_map or {}
+        self.current_page = 1
 
-        section = self.doc.sections[0]
-        w = max(10.0, float(page_width_mm))
-        h = max(10.0, float(page_height_mm))
+        self.w = max(10.0, float(page_width_mm))
+        self.h = max(10.0, float(page_height_mm))
+        self.landscape = bool(landscape)
 
-        if landscape:
-            w, h = max(w, h), min(w, h)
-            section.orientation = WD_ORIENT.LANDSCAPE
+        if self.landscape:
+            self.w, self.h = max(self.w, self.h), min(self.w, self.h)
+            self.orientation = WD_ORIENT.LANDSCAPE
         else:
-            w, h = min(w, h), max(w, h)
-            section.orientation = WD_ORIENT.PORTRAIT
+            self.w, self.h = min(self.w, self.h), max(self.w, self.h)
+            self.orientation = WD_ORIENT.PORTRAIT
 
-        section.page_width = Mm(w)
-        section.page_height = Mm(h)
-        section.top_margin = Mm(max(0.0, float(margin_top_mm)))
-        section.bottom_margin = Mm(max(0.0, float(margin_bottom_mm)))
-        section.left_margin = Mm(max(0.0, float(margin_left_mm)))
-        section.right_margin = Mm(max(0.0, float(margin_right_mm)))
+        self._apply_section_properties(
+            self.doc.sections[0],
+            margin_top_mm,
+            margin_bottom_mm,
+            margin_left_mm,
+            margin_right_mm
+        )
+
+    def _apply_section_properties(self, section, top, btm, lft, rgt):
+        section.orientation = self.orientation
+        section.page_width = Mm(self.w)
+        section.page_height = Mm(self.h)
+        section.top_margin = Mm(max(0.0, float(top)))
+        section.bottom_margin = Mm(max(0.0, float(btm)))
+        section.left_margin = Mm(max(0.0, float(lft)))
+        section.right_margin = Mm(max(0.0, float(rgt)))
+        section.header_margin = Mm(10.0)
+        section.footer_margin = Mm(10.0)
 
     def convert_html(self, html_content: str) -> docx.Document:
         soup = BeautifulSoup(html_content, "html.parser")
@@ -274,9 +289,21 @@ class RichDocxBuilder:
     def _process_block_element(self, tag: Tag):
         tag_name = tag.name.lower()
 
-        # Quebras de página
+        # Quebras de página (com suporte a nova seção caso a próxima folha tenha margem personalizada)
         if "page-break" in tag.get("class", []) or "multi-page-break" in tag.get("class", []):
-            self.doc.add_page_break()
+            self.current_page += 1
+            next_m = self.page_margins_map.get(self.current_page) or self.page_margins_map.get(str(self.current_page))
+            if next_m and isinstance(next_m, dict) and "top" in next_m:
+                new_sec = self.doc.add_section()
+                self._apply_section_properties(
+                    new_sec,
+                    next_m.get("top", 25),
+                    next_m.get("bottom", 25),
+                    next_m.get("left", 20),
+                    next_m.get("right", 20)
+                )
+            else:
+                self.doc.add_page_break()
             return
 
         # Títulos (H1-H6)
@@ -606,17 +633,26 @@ async def export_docx(req: ExportRequest):
     raw_w = req.pageWidth if req.pageWidth is not None else (req.page_width_mm or 210.0)
     raw_h = req.pageHeight if req.pageHeight is not None else (req.page_height_mm or 297.0)
 
-    top_val = req.marginTop if req.marginTop is not None else (req.margin_top_mm if req.margin_top_mm is not None else 25.0)
-    btm_val = req.marginBottom if req.marginBottom is not None else (req.margin_bottom_mm if req.margin_bottom_mm is not None else 25.0)
-    lft_val = req.marginLeft if req.marginLeft is not None else (req.margin_left_mm if req.margin_left_mm is not None else 20.0)
-    rgt_val = req.marginRight if req.marginRight is not None else (req.margin_right_mm if req.margin_right_mm is not None else 20.0)
+    # Extrai margens com suporte total a pageMarginsMap editado pelo usuário
+    page_map = req.pageMarginsMap or {}
+    p1 = page_map.get(1) or page_map.get("1") or {}
+
+    top_cand = p1.get("top") if p1.get("top") is not None else (req.marginTop if req.marginTop is not None else req.margin_top_mm)
+    btm_cand = p1.get("bottom") if p1.get("bottom") is not None else (req.marginBottom if req.marginBottom is not None else req.margin_bottom_mm)
+    lft_cand = p1.get("left") if p1.get("left") is not None else (req.marginLeft if req.marginLeft is not None else req.margin_left_mm)
+    rgt_cand = p1.get("right") if p1.get("right") is not None else (req.marginRight if req.marginRight is not None else req.margin_right_mm)
+
+    top_val = float(top_cand) if top_cand is not None else 25.0
+    btm_val = float(btm_cand) if btm_cand is not None else 25.0
+    lft_val = float(lft_cand) if lft_cand is not None else 20.0
+    rgt_val = float(rgt_cand) if rgt_cand is not None else 20.0
 
     doc_title = req.docName or req.doc_name or "documento"
     format_name = req.formatName or req.format_name or "A4"
 
     logger.info(
         f"Exportando DOCX | Documento: {doc_title} | Formato: {format_name} | "
-        f"{raw_w}x{raw_h}mm | Paisagem: {req.landscape}"
+        f"{raw_w}x{raw_h}mm | Margens: {top_val}/{btm_val}/{lft_val}/{rgt_val}mm | Paisagem: {req.landscape}"
     )
 
     try:
@@ -628,6 +664,7 @@ async def export_docx(req: ExportRequest):
             margin_bottom_mm=btm_val,
             margin_left_mm=lft_val,
             margin_right_mm=rgt_val,
+            page_margins_map=page_map,
             media_root=MEDIA_ROOT,
         )
         doc = builder.convert_html(req.html)
