@@ -95,7 +95,7 @@ const EditorApp = (() => {
               'heading', '|',
               'fontFamily', 'fontSize', '|',
               'bold', 'italic', 'underline', 'strikethrough', 'subscript', 'superscript', 'code', '|',
-              'fontColor', 'fontBackgroundColor', 'highlight', '|',
+              'fontColor', 'fontBackgroundColor', 'highlight', 'removeFormat', '|',
               'alignment', '|',
               'numberedList', 'bulletedList', 'todoList', 'outdent', 'indent', '|',
               'link', 'imageUpload', 'insertTable', 'blockQuote', 'codeBlock', 'horizontalLine', 'specialCharacters', '|',
@@ -180,7 +180,15 @@ const EditorApp = (() => {
 
         window.MediaLibrary?.init(_instance);
         _scheduleWordCount();
-        setTimeout(() => window.PageFormats?.updatePageBoundaries(), 100);
+        setTimeout(() => {
+          window.PageFormats?.updatePageBoundaries();
+          // Customiza o botão removeFormat da toolbar do CKEditor para visualização clara
+          const rfBtn = document.querySelector('.ck-button[data-cke-tooltip-text*="Remove format"], .ck-button[data-cke-tooltip-text*="removeFormat"]');
+          if (rfBtn) {
+            rfBtn.setAttribute('title', '🧹 Limpar Tintas e Formatação (Ctrl+\\)');
+            rfBtn.setAttribute('data-cke-tooltip-text', '🧹 Limpar Tintas / Borracha (Ctrl+\\)');
+          }
+        }, 200);
 
         console.log('✅ [EditorApp] CKEditor 5 montado com link popover e preview interativo!');
         return _instance;
@@ -199,6 +207,12 @@ const EditorApp = (() => {
   function _attachGlobalLinkListeners() {
     // Atalho global Ctrl+K para abrir o dropdown de link
     window.addEventListener('keydown', e => {
+      // Atalho global Ctrl+\\ ou Ctrl+Shift+X para limpar formatação e tintas
+      if ((e.ctrlKey || e.metaKey) && (e.key === '\\' || (e.shiftKey && e.key.toLowerCase() === 'x'))) {
+        e.preventDefault();
+        clearFormatting();
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         openLinkDropdown();
@@ -782,6 +796,45 @@ const EditorApp = (() => {
     }
   }
 
+  
+  /**
+   * Limpa formatação de caracteres e tintas (fontColor, fontBackgroundColor, highlight, etc.)
+   */
+  function clearFormatting() {
+    if (_instance) {
+      try {
+        if (_instance.commands?.get('removeFormat')) {
+          _instance.execute('removeFormat');
+        }
+
+        // Limpeza profunda de tintas e estilos de caracteres na seleção ativa
+        _instance.model.change(writer => {
+          const selection = _instance.model.document.selection;
+          const ranges = selection.getRanges();
+          for (const range of ranges) {
+            writer.removeAttribute('fontColor', range);
+            writer.removeAttribute('fontBackgroundColor', range);
+            writer.removeAttribute('highlight', range);
+            writer.removeAttribute('fontSize', range);
+            writer.removeAttribute('fontFamily', range);
+            writer.removeAttribute('bold', range);
+            writer.removeAttribute('italic', range);
+            writer.removeAttribute('underline', range);
+            writer.removeAttribute('strikethrough', range);
+            writer.removeAttribute('code', range);
+            writer.removeAttribute('subscript', range);
+            writer.removeAttribute('superscript', range);
+          }
+        });
+      } catch (err) {
+        console.warn('[EditorApp] Erro ao limpar formatação:', err);
+      }
+    } else {
+      document.execCommand('removeFormat', false, null);
+    }
+    window.showToast?.('🧹 Formatação e tintas removidas!', 'info');
+  }
+
   function getInstance() {
     return _instance;
   }
@@ -798,7 +851,8 @@ const EditorApp = (() => {
     removeCurrentLink,
     copyActiveLink,
     editActiveLink,
-    removeActiveLink
+    removeActiveLink,
+    clearFormatting
   };
 
 })();

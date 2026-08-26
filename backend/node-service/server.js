@@ -368,7 +368,35 @@ async function renderWithPuppeteer(fullHtml, options = {}) {
 
 /* ══════════════════════════════════════════════════════════
    UTILITÁRIO: EMBUTIR IMAGENS LOCAIS COMO BASE64 PARA PDF/PNG
-═══════════════════════════�/* ══════════════════════════════════════════════════════════
+═══════════════════════════�/* ══════════════════════════════════════════════════════════
+   UTILITÁRIO: EMBUTIR IMAGENS LOCAIS COMO BASE64 PARA PDF/PNG
+══════════════════════════════════════════════════════════ */
+function inlineLocalImages(html) {
+  if (!html) return html;
+  return html.replace(/(<img\b(?:[^>](?!\bsrc=))*?)\bsrc=(["'])(?!data:)([^"']+)\2([^>]*?>)/gi,
+    (match, before, quote, src, after) => {
+      try {
+        let localPath = null;
+        if (src.includes('/media/')) {
+          const mediaSub = src.substring(src.indexOf('/media/') + '/media/'.length);
+          const decoded = decodeURIComponent(mediaSub.split('?')[0]);
+          localPath = path.join(MEDIA_ROOT, decoded);
+        }
+
+        if (localPath && fs.existsSync(localPath) && fs.statSync(localPath).isFile()) {
+          const buffer = fs.readFileSync(localPath);
+          const mime = _guessMime(localPath);
+          const b64 = `data:${mime};base64,${buffer.toString('base64')}`;
+          return `${before}src="${b64}"${after}`;
+        }
+      } catch (err) {
+        console.warn('[inlineLocalImages] Erro ao embutir imagem:', err.message);
+      }
+      return match;
+    });
+}
+
+/* ══════════════════════════════════════════════════════════
    ROTAS DE EXPORTAÇÃO (PDF / PNG)
 ══════════════════════════════════════════════════════════ */
 app.post('/api/export/pdf', exportLimiter, async (req, res) => {
@@ -434,29 +462,28 @@ app.post('/api/export/pdf', exportLimiter, async (req, res) => {
 html, body {
   margin: 0;
   padding: 0;
-  background: #FFFDF5;
+  background: #FFFFFF;
   color: #111111;
-  font-family: 'Merriweather', Georgia, serif;
+  font-family: 'Merriweather', Georgia, 'Times New Roman', serif;
   font-size: 11pt;
   line-height: 1.75;
 }
-h1 { font-family: 'Bangers', cursive; font-size: 28pt; font-weight: 400; letter-spacing: 0.04em; margin: 16pt 0 10pt; color: #111111; }
-h2 { font-family: 'Bangers', cursive; font-size: 19pt; font-weight: 400; letter-spacing: 0.03em; margin: 14pt 0 7pt; color: #111111; }
-h3 { font-family: 'Bangers', cursive; font-size: 15pt; font-weight: 400; letter-spacing: 0.03em; margin: 12pt 0 6pt; color: #D95D39; }
-h4 { font-family: 'Special Elite', serif; font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #3F5E4D; }
+h1 { font-size: 26pt; font-weight: 700; margin: 16pt 0 10pt; color: #111111; }
+h2 { font-size: 19pt; font-weight: 700; margin: 14pt 0 7pt; color: #111111; }
+h3 { font-size: 15pt; font-weight: 700; margin: 12pt 0 6pt; color: #111111; }
+h4 { font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #111111; }
 p  { margin-bottom: 8pt; orphans: 3; widows: 3; }
 ul, ol { margin: 6pt 0 8pt 24pt; }
 li { margin-bottom: 4pt; }
 .todo-list { list-style: none; padding-left: 0; }
 .todo-list li { display: flex; align-items: flex-start; gap: 8px; }
-table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 2px solid #111111; page-break-inside: avoid; break-inside: avoid; }
-th, td { border: 1px solid #111111; padding: 7pt 10pt; }
-th { background: #111111; color: #F3E9D2; font-family: 'Bangers', cursive; font-size: 11pt; letter-spacing: 0.04em; }
-tr:nth-child(even) td { background: rgba(243, 233, 210, 0.4); }
+table { width: 100%; border-collapse: collapse; margin: 14pt 0; font-size: 10.5pt; border: 1px solid #333333; page-break-inside: avoid; break-inside: avoid; }
+th, td { border: 1px solid #333333; padding: 7pt 10pt; }
+th { background: #F8F9FA; color: #111111; font-weight: 700; font-size: 11pt; }
 figure.image { box-sizing: border-box; max-width: 100%; margin: 12pt auto; display: table; page-break-inside: avoid; break-inside: avoid; }
 figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
-figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111111; }
-img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; }
+figure.image img { width: 100%; height: auto; display: block; border: 1px solid #CCCCCC; }
+img { max-width: 100%; height: auto; border: 1px solid #CCCCCC; display: block; }
 #editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
   background: transparent !important;
   padding: 0 !important;
@@ -470,11 +497,11 @@ img { max-width: 100%; height: auto; border: 2px solid #111111; display: block; 
 .image-style-align-right { float: right !important; margin: 8pt 0 12pt 16pt !important; }
 .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
 .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
-blockquote { border-left: 5px solid #D95D39; margin: 14pt 0; padding: 10pt 16pt; color: #2c2013; background: rgba(217,93,57,0.08); font-style: italic; page-break-inside: avoid; break-inside: avoid; }
-a { color: #D95D39; text-decoration: underline; }
-pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; page-break-inside: avoid; break-inside: avoid; }
-code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
-hr { border: none; height: 3px; background: #111111; margin: 20pt 0; }
+blockquote { border-left: 4px solid #555555; margin: 14pt 0; padding: 10pt 16pt; color: #444444; background: rgba(0,0,0,0.03); font-style: italic; page-break-inside: avoid; break-inside: avoid; }
+a { color: #1A73E8; text-decoration: underline; }
+pre { background: #222222; color: #F8F8F8; border: 1px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; page-break-inside: avoid; break-inside: avoid; }
+code { font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.05); color: #C7254E; padding: 1px 5px; border-radius: 2px; }
+hr { border: none; height: 1px; background: #CCCCCC; margin: 20pt 0; }
 .page-break {
   page-break-after: always;
   break-after: page;
@@ -587,28 +614,29 @@ html, body {
   margin: 0;
   padding: 0;
   width: ${vpW}px;
-  background: #FFFDF5;
+  background: #FFFFFF;
 }
 body {
-  font-family: 'Merriweather', Georgia, serif;
+  font-family: 'Merriweather', Georgia, 'Times New Roman', serif;
   font-size: 11pt;
   line-height: 1.75;
   color: #111111;
   padding: ${padTopPx}px ${padRgtPx}px ${padBtmPx}px ${padLftPx}px;
 }
-h1 { font-family: 'Bangers', cursive; font-size: 28pt; margin-bottom: 12pt; }
-h2 { font-family: 'Bangers', cursive; font-size: 20pt; margin: 14pt 0 7pt; }
-h3 { font-family: 'Bangers', cursive; font-size: 15pt; margin: 12pt 0 6pt; color: #D95D39; }
+h1 { font-size: 26pt; font-weight: 700; margin-bottom: 12pt; color: #111111; }
+h2 { font-size: 19pt; font-weight: 700; margin: 14pt 0 7pt; color: #111111; }
+h3 { font-size: 15pt; font-weight: 700; margin: 12pt 0 6pt; color: #111111; }
+h4 { font-size: 12pt; font-weight: 700; margin: 10pt 0 4pt; color: #111111; }
 p  { margin-bottom: 8pt; }
 ul, ol { margin: 6pt 0 8pt 24pt; }
 li { margin-bottom: 4pt; }
-table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 2px solid #111; }
-th, td { border: 1px solid #111; padding: 7pt 10pt; }
-th { background: #111; color: #F3E9D2; }
+table { width: 100%; border-collapse: collapse; margin: 14pt 0; border: 1px solid #333333; }
+th, td { border: 1px solid #333333; padding: 7pt 10pt; }
+th { background: #F8F9FA; color: #111111; font-weight: 700; }
 figure.image { box-sizing: border-box; max-width: 100%; margin: 12px auto; display: table; }
 figure.image[style*="absolute"] { display: block !important; margin: 0 !important; }
-figure.image img { width: 100%; height: auto; display: block; border: 2px solid #111; }
-img { max-width: 100%; height: auto; border: 2px solid #111; display: block; }
+figure.image img { width: 100%; height: auto; display: block; border: 1px solid #CCCCCC; }
+img { max-width: 100%; height: auto; border: 1px solid #CCCCCC; display: block; }
 #editor, .ck-content, .ck-editor__editable, .ck.ck-editor {
   background: transparent !important;
   padding: 0 !important;
@@ -622,11 +650,11 @@ img { max-width: 100%; height: auto; border: 2px solid #111; display: block; }
 .image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
 .image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
 .image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
-blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
-a { color: #D95D39; text-decoration: underline; }
-pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
-code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
-hr { border: none; height: 3px; background: #111; margin: 20pt 0; }
+blockquote { border-left: 4px solid #555555; padding: 10pt 16pt; background: rgba(0,0,0,0.03); color: #444444; font-style: italic; }
+a { color: #1A73E8; text-decoration: underline; }
+pre { background: #222222; color: #F8F8F8; border: 1px solid #111111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
+code { font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.05); color: #C7254E; padding: 1px 5px; border-radius: 2px; }
+hr { border: none; height: 1px; background: #CCCCCC; margin: 20pt 0; }
 .page-break {
   page-break-after: always;
   break-after: page;
@@ -644,45 +672,6 @@ hr { border: none; height: 3px; background: #111; margin: 20pt 0; }
 .page-boundary-marker, .page-boundary-badge { display: none !important; }
 </style>
 </head><body>${cleanHtml}</body></html>`;
-
-  try {
-    const png = await renderWithPuppeteer(fullHtml, {
-      type: 'png',
-      viewport: { width: vpW, height: vpH, deviceScaleFactor: 2 },
-    });
-
-    const safeDoc = String(req.body.docName || req.body.doc_name || 'documento')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 40) || 'documento';
-    const safeFmt = String(req.body.formatName || req.body.format_name || `${numW}x${numH}mm`)
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[×✕✖*]/g, 'x').replace(/[^a-zA-Z0-9_\-]/g, '_').substring(0, 20) || 'formato';
-
-    res.set({
-      'Content-Type': 'image/png',
-      'Content-Disposition': `attachment; filename="${safeDoc}_${safeFmt}.png"`,
-      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Type',
-    });
-    res.send(png);
-  } catch (err) {
-    console.error('[IMG] Erro de exportação:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});parent !important; padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; border: none !important; box-shadow: none !important; }
-.image-style-align-left  { float: left !important; margin: 8px 16px 12px 0 !important; }
-.image-style-align-right { float: right !important; margin: 8px 0 12px 16px !important; }
-.image-style-align-center { margin-left: auto !important; margin-right: auto !important; display: table !important; }
-.image-style-block { display: block !important; margin-left: auto !important; margin-right: auto !important; }
-blockquote { border-left: 5px solid #D95D39; padding: 10pt 16pt; background: rgba(217,93,57,0.08); font-style: italic; }
-a { color: #D95D39; text-decoration: underline; }
-pre { background: #1a1714; color: #f8f4e9; border: 2px solid #111; border-radius: 3px; padding: 12pt 14pt; font-family: 'JetBrains Mono', monospace; font-size: 9.5pt; margin: 12pt 0; }
-code { font-family: 'JetBrains Mono', monospace; background: rgba(17,17,17,0.08); color: #D95D39; padding: 1px 5px; border-radius: 2px; }
-hr { border: none; height: 3px; background: #111; margin: 20pt 0; }
-.page-break { display: none !important; }
-.page-first-element { margin-top: 0 !important; }
-.page-boundary-marker, .page-boundary-badge { display: none !important; }
-</style>
-</head><body>${pagesHtml}</body></html>`;
 
   try {
     const png = await renderWithPuppeteer(fullHtml, {
