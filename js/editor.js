@@ -768,6 +768,20 @@ const EditorApp = (() => {
       if (editorEl) raw = editorEl.innerHTML || '';
     }
 
+    // Coleta elementos livres do documento anexados à folha, ignorando expressamente a camada #sheet-overlays
+    const sheet = document.getElementById('page-sheet');
+    if (sheet) {
+      const freeElements = Array.from(sheet.children).filter(el => 
+        el.id !== 'sheet-overlays' && 
+        el.id !== 'editor' && 
+        !el.classList.contains('ck') &&
+        !el.classList.contains('sheet-overlays')
+      );
+      if (freeElements.length > 0) {
+        raw += freeElements.map(el => el.outerHTML).join('\n');
+      }
+    }
+
     return _cleanEditorHtml(raw);
   }
 

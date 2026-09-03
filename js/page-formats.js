@@ -181,6 +181,21 @@ const PageFormats = (() => {
     _debounceTimer = setTimeout(_calculateAndRenderPages, 50);
   }
 
+  function _getOverlaysLayer() {
+    let layer = document.getElementById('sheet-overlays');
+    if (!layer) {
+      const sheet = document.getElementById('page-sheet');
+      if (sheet) {
+        layer = document.createElement('div');
+        layer.id = 'sheet-overlays';
+        layer.className = 'sheet-overlays';
+        layer.setAttribute('aria-hidden', 'true');
+        sheet.insertBefore(layer, sheet.firstChild);
+      }
+    }
+    return layer;
+  }
+
   function _calculateAndRenderPages() {
     const sheet = document.getElementById('page-sheet');
     const editor = document.getElementById('editor') || document.querySelector('.ck-editor__editable');
@@ -190,8 +205,15 @@ const PageFormats = (() => {
     const pageHeightPx = _pageHeightMm * MM_TO_PX;
     if (pageHeightPx < 50) return;
 
-    // Remove divisores anteriores e caixas de guia
-    sheet.querySelectorAll('.multi-page-break, .page-guide-box').forEach(el => el.remove());
+    const overlaysLayer = _getOverlaysLayer();
+    const targetHost = overlaysLayer || sheet;
+
+    // Limpeza atômica e limpa das overlays visuais (sem encostar no conteúdo do documento)
+    if (overlaysLayer) {
+      overlaysLayer.replaceChildren();
+    } else {
+      sheet.querySelectorAll('.multi-page-break, .page-guide-box').forEach(el => el.remove());
+    }
 
     const children = Array.from(editor.children);
     const targetFirstElements = new Map();
@@ -241,10 +263,36 @@ const PageFormats = (() => {
         continue;
       }
 
+      const childTag = child.tagName ? child.tagName.toLowerCase() : '';
+      const isHeading = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(childTag);
+      const isIndivisible = ['table', 'figure', 'pre', 'blockquote'].includes(childTag) || 
+                            child.classList.contains('todo-list') || 
+                            child.classList.contains('image');
+
       const childHeight = child.offsetHeight || 24;
 
+      // Regra Determinística: Keep-With-Next para títulos e Break-Inside Avoid para blocos indivisíveis
+      let shouldBreakBefore = false;
+      if (currentAccumHeightPx > 0) {
+        if (isHeading && i < children.length - 1) {
+          // Garante que o título não fique órfão no rodapé: avalia o título + a altura do próximo bloco
+          const nextChild = children[i + 1];
+          const nextMinHeight = Math.min(nextChild?.offsetHeight || 36, 60);
+          if ((currentAccumHeightPx + childHeight + nextMinHeight) > (usableHeightPx + 4)) {
+            shouldBreakBefore = true;
+          }
+        } else if (isIndivisible) {
+          // Bloco indivisível que não cabe por inteiro na folha atual vai inteiro para a próxima
+          if ((currentAccumHeightPx + childHeight) > (usableHeightPx + 4)) {
+            shouldBreakBefore = true;
+          }
+        } else if ((currentAccumHeightPx + childHeight) > (usableHeightPx + 4)) {
+          shouldBreakBefore = true;
+        }
+      }
+
       // Se este elemento faz o conteúdo ultrapassar a área útil da página atual:
-      if (currentAccumHeightPx > 0 && (currentAccumHeightPx + childHeight) > (usableHeightPx + 4)) {
+      if (shouldBreakBefore) {
         const prevPage = currentPage;
         const prevMargins = currentMargins;
         currentPage++;
@@ -310,8 +358,12 @@ const PageFormats = (() => {
       const pageHeightSnap = _pageHeightMm;
 
       requestAnimationFrame(() => {
-        // Remove divisores remanescentes (podem ter sido re-inseridos por rAF duplo)
-        sheet.querySelectorAll('.multi-page-break').forEach(el => el.remove());
+        // Remove divisores remanescentes exclusivamente no host de overlays
+        if (overlaysLayer) {
+          overlaysLayer.querySelectorAll('.multi-page-break').forEach(el => el.remove());
+        } else {
+          sheet.querySelectorAll('.multi-page-break').forEach(el => el.remove());
+        }
 
         breakSnapshot.forEach(({ page, targetEl, prevMargins, currMargins }) => {
           const breakEl = document.createElement('div');
@@ -342,7 +394,7 @@ const PageFormats = (() => {
           const breakHeightPx = (prevMargins.bottom + currMargins.top) * MM_TO_PX + DESK_GAP_PX;
           breakEl.style.top = `${elTop - breakHeightPx}px`;
           breakEl.style.height = `${breakHeightPx}px`;
-          sheet.appendChild(breakEl);
+          targetHost.appendChild(breakEl);
         });
 
         // Adiciona classe has-guide-boxes se houver guias JS (suprime ::before duplicado)
@@ -357,7 +409,7 @@ const PageFormats = (() => {
       sheet.classList.remove('has-guide-boxes');
     }
 
-    // Se as linhas-guia estiverem ativadas, desenha a moldura de cada folha independente
+    // Se as linhas-guia estiverem ativadas, desenha a moldura de cada folha independente no container de overlays
     if (_showGuides) {
       const DESK_GAP_MM = 36 / MM_TO_PX;
       for (let p = 1; p <= _totalPages; p++) {
@@ -370,7 +422,7 @@ const PageFormats = (() => {
         guideBox.style.height = `${pUsableHeightMm}mm`;
         guideBox.style.left   = `${pMargins.left}mm`;
         guideBox.style.right  = `${pMargins.right}mm`;
-        sheet.appendChild(guideBox);
+        targetHost.appendChild(guideBox);
       }
     }
 

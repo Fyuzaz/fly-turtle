@@ -290,7 +290,8 @@ class RichDocxBuilder:
         tag_name = tag.name.lower()
 
         # Quebras de página (com suporte a nova seção caso a próxima folha tenha margem personalizada)
-        if "page-break" in tag.get("class", []) or "multi-page-break" in tag.get("class", []):
+        classes = tag.get("class", [])
+        if "page-break" in classes or "multi-page-break" in classes or "ck-page-break" in classes:
             self.current_page += 1
             next_m = self.page_margins_map.get(self.current_page) or self.page_margins_map.get(str(self.current_page))
             if next_m and isinstance(next_m, dict) and "top" in next_m:
@@ -306,10 +307,11 @@ class RichDocxBuilder:
                 self.doc.add_page_break()
             return
 
-        # Títulos (H1-H6)
+        # Títulos (H1-H6) — Regra Keep-With-Next ativa para prevenir títulos órfãos
         if tag_name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
             level = int(tag_name[1])
             p = self.doc.add_paragraph()
+            p.paragraph_format.keep_with_next = True
             self._apply_paragraph_styles(p, tag, default_space_before=14 - level * 2, default_space_after=6)
 
             tag_styles = parse_inline_styles(tag.get("style", ""))
@@ -436,6 +438,15 @@ class RichDocxBuilder:
         table.style = "Table Grid"
 
         for row_idx, r in enumerate(rows):
+            doc_row = table.rows[row_idx]
+            try:
+                trPr = doc_row._tr.get_or_add_trPr()
+                trPr.append(parse_xml(r'<w:cantSplit %s/>' % nsdecls('w')))
+                if row_idx == 0:
+                    trPr.append(parse_xml(r'<w:tblHeader %s/>' % nsdecls('w')))
+            except Exception:
+                pass
+
             cells = r.find_all(["th", "td"])
             for col_idx, cell_tag in enumerate(cells):
                 if col_idx >= col_count:
@@ -477,38 +488,72 @@ class RichDocxBuilder:
         if not img_bytes:
             return
 
-        p = self.doc.add_paragraph()
+        anchor_mode = tag.get("data-anchor-mode") or img_tag.get("data-anchor-mode") or "inline"
+        wrap_align = tag.get("data-wrap-align") or img_tag.get("data-wrap-align")
         classes = tag.get("class", []) + img_tag.get("class", [])
+        styles = parse_inline_styles((tag.get("style", "") or "") + ";" + (img_tag.get("style", "") or ""))
 
-        if "image-style-align-left" in classes or "image-style-side" in classes:
-            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        elif "image-style-align-right" in classes:
-            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p = self.doc.add_paragraph()
+
+        # Alinhamento do parágrafo conforme o modo de âncora
+        if anchor_mode == "wrap" or "image-style-align-left" in classes or "image-style-align-right" in classes or styles.get("float") in ["left", "right"]:
+            if wrap_align == "right" or "image-style-align-right" in classes or styles.get("float") == "right":
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            else:
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        elif anchor_mode == "fixed":
+            x_mm_str = tag.get("data-x-mm") or img_tag.get("data-x-mm")
+            try:
+                x_mm = float(x_mm_str) if x_mm_str else 0.0
+                if x_mm > (self.w / 2.0):
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                elif x_mm > 30:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                else:
+                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            except Exception:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         else:
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        p.paragraph_format.space_before = Pt(8)
-        p.paragraph_format.space_after = Pt(8)
+        p.paragraph_format.space_before = Pt(6)
+        p.paragraph_format.space_after = Pt(6)
 
-        styles = parse_inline_styles(img_tag.get("style", ""))
-        width_str = styles.get("width") or img_tag.get("width")
+        # Resolução de largura com prioridade para data-width-mm
         width_val = None
-        if width_str:
-            m = re.match(r"([\d.]+)\s*(px|mm|cm|%)?", str(width_str))
-            if m:
-                v = float(m.group(1))
-                u = m.group(2) or "px"
-                if u == "mm":
-                    width_val = Mm(v)
-                elif u == "cm":
-                    width_val = Mm(v * 10)
-                elif u == "px":
-                    width_val = Inches(v / 96.0)
-                elif u == "%":
-                    width_val = Inches(5.5 * (v / 100.0))
+        width_mm_str = tag.get("data-width-mm") or img_tag.get("data-width-mm")
+        if width_mm_str:
+            try:
+                width_val = Mm(float(width_mm_str))
+            except Exception:
+                pass
+
+        if not width_val:
+            width_str = styles.get("width") or img_tag.get("width")
+            if width_str:
+                m = re.match(r"([\d.]+)\s*(px|mm|cm|%)?", str(width_str))
+                if m:
+                    v = float(m.group(1))
+                    u = m.group(2) or "px"
+                    if u == "mm":
+                        width_val = Mm(v)
+                    elif u == "cm":
+                        width_val = Mm(v * 10)
+                    elif u == "px":
+                        width_val = Inches(v / 96.0)
+                    elif u == "%":
+                        width_val = Inches(5.5 * (v / 100.0))
 
         if not width_val:
             width_val = Inches(5.0)
+
+        # Confinamento para não ultrapassar a largura útil da folha
+        max_printable_mm = max(20.0, self.w - 40.0)
+        try:
+            if width_val.mm > max_printable_mm:
+                width_val = Mm(max_printable_mm)
+        except Exception:
+            pass
 
         try:
             stream = io.BytesIO(img_bytes)

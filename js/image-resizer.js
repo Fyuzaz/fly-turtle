@@ -55,28 +55,52 @@ const ImageResizer = (() => {
         <span>✥</span> ARRASTAR & MOVER
       </div>
 
-      <!-- Toolbar flutuante de layout, camadas e movimentação -->
+      <!-- Toolbar flutuante de layout com 3 Modos Canônicos de Âncora (Estilo Google Docs) -->
       <div class="resizer-toolbar" id="resizer-toolbar">
-        <button type="button" class="resizer-btn btn-mode" data-action="toggle-free" id="btn-toggle-free" title="Alternar entre posicionamento livre e no fluxo de texto">
-          📍 Modo Livre
+        <!-- 3 Modos Canônicos -->
+        <button type="button" class="resizer-btn btn-mode" data-action="mode-inline" id="btn-mode-inline" title="Em Linha: O texto fica antes e depois da imagem, sem contornar as laterais">
+          📄 Linha
         </button>
+        <button type="button" class="resizer-btn btn-mode" data-action="mode-wrap" id="btn-mode-wrap" title="Ajustar Texto: O texto contorna a imagem pelas laterais com margem suave">
+          🔲 Ajustar
+        </button>
+        <button type="button" class="resizer-btn btn-mode" data-action="mode-fixed" id="btn-mode-fixed" title="Posição Fixa: Mover livremente para qualquer coordenada da folha independente do texto">
+          📍 Livre
+        </button>
+        
         <div class="resizer-divider"></div>
-        <button type="button" class="resizer-btn" data-action="move-up" id="btn-move-up" title="Subir posição no documento ou trazer camada para frente">▲ Subir</button>
-        <button type="button" class="resizer-btn" data-action="move-down" id="btn-move-down" title="Descer posição no documento ou enviar camada para trás">▼ Descer</button>
+        
+        <!-- Alinhamentos -->
+        <button type="button" class="resizer-btn" data-action="align-left" id="btn-align-left" title="Alinhar à Esquerda (Contorno à Esquerda)">⬅</button>
+        <button type="button" class="resizer-btn" data-action="align-center" id="btn-align-center" title="Centralizar (Em Linha)">⏺</button>
+        <button type="button" class="resizer-btn" data-action="align-right" id="btn-align-right" title="Alinhar à Direita (Contorno à Direita)">➡</button>
+        
         <div class="resizer-divider"></div>
-        <button type="button" class="resizer-btn" data-action="align-left" title="Alinhar à Esquerda">⬅</button>
-        <button type="button" class="resizer-btn" data-action="align-center" title="Centralizar">⏺</button>
-        <button type="button" class="resizer-btn" data-action="align-right" title="Alinhar à Direita">➡</button>
-        <button type="button" class="resizer-btn" data-action="size-50" title="50% da largura">50%</button>
-        <button type="button" class="resizer-btn" data-action="size-100" title="Largura Total">100%</button>
-        <button type="button" class="resizer-btn danger" data-action="delete" title="Excluir Imagem (ou aperte Delete no teclado)">🗑</button>
+        
+        <!-- Camadas / Posição -->
+        <button type="button" class="resizer-btn" data-action="move-up" id="btn-move-up" title="Trazer camada para frente ou mover no texto">▲ Subir</button>
+        <button type="button" class="resizer-btn" data-action="move-down" id="btn-move-down" title="Enviar camada para trás ou mover no texto">▼ Descer</button>
+        
+        <div class="resizer-divider"></div>
+        
+        <!-- Presets de Escala Proporcional -->
+        <button type="button" class="resizer-btn" data-action="size-25" title="25% da largura da folha">25%</button>
+        <button type="button" class="resizer-btn" data-action="size-50" title="50% da largura da folha">50%</button>
+        <button type="button" class="resizer-btn" data-action="size-75" title="75% da largura da folha">75%</button>
+        <button type="button" class="resizer-btn" data-action="size-100" title="Largura total da folha">100%</button>
+        
+        <div class="resizer-divider"></div>
+        
+        <!-- Excluir -->
+        <button type="button" class="resizer-btn danger" data-action="delete" title="Excluir Imagem (Delete)">🗑</button>
       </div>
 
       <!-- Badge de tamanho, camada e modo -->
       <div class="resizer-dim-badge" id="resizer-dim-badge">0 × 0 px</div>
     `;
 
-    document.body.appendChild(_overlay);
+    const host = document.getElementById('global-overlays-container') || document.body;
+    host.appendChild(_overlay);
 
     // Eventos nas alças de escala
     _overlay.querySelectorAll('.resizer-handle').forEach(handle => {
@@ -100,7 +124,8 @@ const ImageResizer = (() => {
     _dropIndicator.id = 'img-drop-indicator';
     _dropIndicator.className = 'img-drop-indicator hidden';
     _dropIndicator.innerHTML = '<span>━━━ Soltar Imagem Aqui ━━━</span>';
-    document.body.appendChild(_dropIndicator);
+    const host = document.getElementById('global-overlays-container') || document.body;
+    host.appendChild(_dropIndicator);
   }
 
   /* ──────────────────────────────────────────────────────────
@@ -214,42 +239,94 @@ const ImageResizer = (() => {
     if (badge) {
       const w = Math.round(_activeImg.getBoundingClientRect().width);
       const h = Math.round(_activeImg.getBoundingClientRect().height);
-      const isFree = _isFreeFloating(_activeImg);
       const targetEl = _activeImg.closest('figure.image') || _activeImg;
-      const zIndex = targetEl.style.zIndex || (isFree ? '10' : 'auto');
-      const modeLabel = isFree ? `📍 Camada: ${zIndex}` : '📄 No Texto';
+      const mode = _getAnchorMode(targetEl);
+      const zIndex = targetEl.style.zIndex || '10';
+      let modeLabel = '📄 Em Linha';
+      if (mode === 'fixed') modeLabel = `📍 Posição Fixa (Z: ${zIndex})`;
+      else if (mode === 'wrap') modeLabel = `🔲 Ajustar (${targetEl.dataset.wrapAlign === 'right' ? 'Direita' : 'Esquerda'})`;
       badge.textContent = `${w} × ${h} px · ${modeLabel}`;
     }
   }
 
+  function _getAnchorMode(imgOrFigure) {
+    if (!imgOrFigure) return 'inline';
+    const el = imgOrFigure.closest('figure.image') || imgOrFigure;
+    if (el.style.position === 'absolute' || el.dataset.anchorMode === 'fixed') {
+      return 'fixed';
+    }
+    if (el.style.float === 'left' || el.style.float === 'right' || 
+        el.classList.contains('image-style-align-left') || el.classList.contains('image-style-align-right') || 
+        el.dataset.anchorMode === 'wrap') {
+      return 'wrap';
+    }
+    return 'inline';
+  }
+
   function _isFreeFloating(img) {
-    const el = img.closest('figure.image') || img;
-    return el.style.position === 'absolute';
+    return _getAnchorMode(img) === 'fixed';
+  }
+
+  function _syncMetricData(targetEl) {
+    if (!targetEl) return;
+    const MM_TO_PX = 3.7795275591;
+    const rect = targetEl.getBoundingClientRect();
+    if (rect.width > 0) {
+      targetEl.dataset.widthMm = (rect.width / MM_TO_PX).toFixed(2);
+      targetEl.dataset.heightMm = (rect.height / MM_TO_PX).toFixed(2);
+    }
+    const mode = _getAnchorMode(targetEl);
+    targetEl.dataset.anchorMode = mode;
+
+    if (mode === 'fixed') {
+      const sheet = document.getElementById('page-sheet');
+      if (sheet) {
+        const sheetRect = sheet.getBoundingClientRect();
+        const left = Math.max(0, rect.left - sheetRect.left);
+        const top = Math.max(0, rect.top - sheetRect.top);
+        targetEl.dataset.xMm = (left / MM_TO_PX).toFixed(2);
+        targetEl.dataset.yMm = (top / MM_TO_PX).toFixed(2);
+      }
+    }
   }
 
   function _updateModeButtonText() {
-    const btnMode   = document.getElementById('btn-toggle-free');
+    if (!_activeImg) return;
+    const targetEl = _activeImg.closest('figure.image') || _activeImg;
+    const mode = _getAnchorMode(targetEl);
+
+    const btnInline = document.getElementById('btn-mode-inline');
+    const btnWrap   = document.getElementById('btn-mode-wrap');
+    const btnFixed  = document.getElementById('btn-mode-fixed');
+    const btnLeft   = document.getElementById('btn-align-left');
+    const btnCenter = document.getElementById('btn-align-center');
+    const btnRight  = document.getElementById('btn-align-right');
     const btnUp     = document.getElementById('btn-move-up');
     const btnDown   = document.getElementById('btn-move-down');
-    if (!_activeImg) return;
 
-    const isFree = _isFreeFloating(_activeImg);
-    if (btnMode) {
-      btnMode.textContent = isFree ? '📄 Modo Texto' : '📍 Modo Livre';
-      btnMode.classList.toggle('active', isFree);
-    }
+    btnInline?.classList.toggle('active', mode === 'inline');
+    btnWrap?.classList.toggle('active', mode === 'wrap');
+    btnFixed?.classList.toggle('active', mode === 'fixed');
+
+    const isLeft   = targetEl.classList.contains('image-style-align-left') || targetEl.style.float === 'left';
+    const isRight  = targetEl.classList.contains('image-style-align-right') || targetEl.style.float === 'right';
+    const isCenter = !isLeft && !isRight;
+
+    btnLeft?.classList.toggle('active', isLeft);
+    btnCenter?.classList.toggle('active', isCenter && mode !== 'fixed');
+    btnRight?.classList.toggle('active', isRight);
 
     if (btnUp && btnDown) {
-      if (isFree) {
+      if (mode === 'fixed') {
         btnUp.textContent   = '⤉ Frente';
         btnUp.title         = 'Trazer camada para frente (aumentar z-index)';
         btnDown.textContent = '⤈ Trás';
         btnDown.title       = 'Enviar camada para trás (diminuir z-index)';
       } else {
         btnUp.textContent   = '▲ Subir';
-        btnUp.title         = 'Mover para cima do parágrafo anterior no texto';
+        btnUp.title         = 'Mover para cima no texto';
         btnDown.textContent = '▼ Descer';
-        btnDown.title       = 'Mover para baixo do próximo parágrafo no texto';
+        btnDown.title       = 'Mover para baixo no texto';
       }
     }
   }
@@ -446,11 +523,17 @@ const ImageResizer = (() => {
      MOUSE UP (Finaliza Escala ou Movimentação)
   ══════════════════════════════════════════════════════════ */
   function _onMouseUp() {
+    const targetEl = _activeImg ? (_activeImg.closest('figure.image') || _activeImg) : null;
+
     if (_isResizing) {
       _isResizing = false;
       _dragHandle = null;
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      if (targetEl) {
+        _syncMetricData(targetEl);
+        document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       _updateOverlayPosition();
     }
 
@@ -460,17 +543,14 @@ const ImageResizer = (() => {
       document.body.style.userSelect = '';
       _overlay.classList.remove('is-moving');
 
-      const targetEl = _activeImg.closest('figure.image') || _activeImg;
-
       // Se soltou sobre um parágrafo/bloco no modo de texto dentro do documento
-      if (!_isFreeFloating(_activeImg) && _dropTarget && _dropTarget.parentNode) {
+      if (targetEl && !_isFreeFloating(_activeImg) && _dropTarget && _dropTarget.parentNode) {
         if (_dropPosition === 'before') {
           _dropTarget.parentNode.insertBefore(targetEl, _dropTarget);
         } else {
           _dropTarget.parentNode.insertBefore(targetEl, _dropTarget.nextSibling);
         }
 
-        // Mantém as dimensões fixadas e sincroniza autossalvamento
         const currentW = Math.round(targetEl.getBoundingClientRect().width || _activeImg.getBoundingClientRect().width);
         if (currentW > 0) {
           _activeImg.style.width  = `${currentW}px`;
@@ -480,19 +560,22 @@ const ImageResizer = (() => {
             targetEl.style.height = 'auto';
           }
         }
-        document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
         window.showToast?.('Imagem reposicionada no texto!', 'success');
+      }
+
+      if (targetEl) {
+        _syncMetricData(targetEl);
+        document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
       _hideDropIndicator();
       _dropTarget = null;
-
       setTimeout(_updateOverlayPosition, 50);
     }
   }
 
   /* ══════════════════════════════════════════════════════════
-     TOOLBAR FLUTUANTE (Ações Rápidas)
+     TOOLBAR FLUTUANTE (Ações Rápidas Estilo Google Docs)
   ══════════════════════════════════════════════════════════ */
   function _onToolbarClick(e) {
     const btn = e.target.closest('.resizer-btn');
@@ -503,16 +586,16 @@ const ImageResizer = (() => {
     const targetEl = _activeImg.closest('figure.image') || _activeImg;
 
     switch (action) {
-      case 'toggle-free':
-        _toggleFreeFloating();
+      case 'mode-inline':
+        _setAnchorMode('inline');
         break;
 
-      case 'move-up':
-        _moveItemUp();
+      case 'mode-wrap':
+        _setAnchorMode('wrap');
         break;
 
-      case 'move-down':
-        _moveItemDown();
+      case 'mode-fixed':
+        _setAnchorMode('fixed');
         break;
 
       case 'align-left':
@@ -527,16 +610,28 @@ const ImageResizer = (() => {
         _applyAlignment('right');
         break;
 
+      case 'move-up':
+        _moveItemUp();
+        break;
+
+      case 'move-down':
+        _moveItemDown();
+        break;
+
+      case 'size-25':
+        _applySizePercent(25);
+        break;
+
       case 'size-50':
-        _activeImg.style.width = '50%';
-        _activeImg.style.height = 'auto';
-        if (targetEl !== _activeImg) targetEl.style.width = '50%';
+        _applySizePercent(50);
+        break;
+
+      case 'size-75':
+        _applySizePercent(75);
         break;
 
       case 'size-100':
-        _activeImg.style.width = '100%';
-        _activeImg.style.height = 'auto';
-        if (targetEl !== _activeImg) targetEl.style.width = '100%';
+        _applySizePercent(100);
         break;
 
       case 'delete':
@@ -548,8 +643,50 @@ const ImageResizer = (() => {
   }
 
   /* ──────────────────────────────────────────────────────────
-     Alterna entre Modo Livre e Modo No Texto
+     Alternar Modo de Âncora (Inline vs Wrap vs Fixed)
   ────────────────────────────────────────────────────────── */
+  function _setAnchorMode(mode) {
+    if (!_activeImg) return;
+    const targetEl = _activeImg.closest('figure.image') || _activeImg;
+    const sheet    = document.getElementById('page-sheet');
+    const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+
+    if (mode === 'fixed') {
+      targetEl.dataset.anchorMode = 'fixed';
+      _enableFreeMode(targetEl, sheet);
+      window.showToast?.('📍 Modo Posição Fixa ativado! Arraste livremente pela folha.', 'success');
+    } else if (mode === 'wrap') {
+      targetEl.dataset.anchorMode = 'wrap';
+      if (editorEl && targetEl.parentNode !== editorEl) {
+        editorEl.appendChild(targetEl);
+      }
+      targetEl.style.position = '';
+      targetEl.style.left     = '';
+      targetEl.style.top      = '';
+      targetEl.style.zIndex   = '';
+      const currentAlign = targetEl.dataset.wrapAlign || 'left';
+      _applyAlignment(currentAlign);
+      window.showToast?.('🔲 Modo Ajustar Texto ativado! O texto contorna a imagem.', 'info');
+    } else { // inline
+      targetEl.dataset.anchorMode = 'inline';
+      if (editorEl && targetEl.parentNode !== editorEl) {
+        editorEl.appendChild(targetEl);
+      }
+      targetEl.style.position = '';
+      targetEl.style.left     = '';
+      targetEl.style.top      = '';
+      targetEl.style.zIndex   = '';
+      _applyAlignment('center');
+      window.showToast?.('📄 Modo Em Linha ativado! A imagem flui com o texto.', 'info');
+    }
+
+    _updateModeButtonText();
+    _syncMetricData(targetEl);
+    _updateBadge();
+    document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
+    setTimeout(_updateOverlayPosition, 50);
+  }
+
   function _enableFreeMode(targetEl, sheet) {
     const sheetRect  = sheet.getBoundingClientRect();
     const targetRect = targetEl.getBoundingClientRect();
@@ -565,11 +702,12 @@ const ImageResizer = (() => {
     left = Math.max(0, Math.min(left, maxLeft));
     top  = Math.max(0, Math.min(top, maxTop));
 
-    // Desacopla do fluxo do parágrafo: anexa diretamente à folha para ter eixo 100% independente
+    // Desacopla do fluxo do parágrafo: anexa à folha (fora da camada #sheet-overlays)
     if (targetEl.parentNode !== sheet) {
       sheet.appendChild(targetEl);
     }
 
+    targetEl.dataset.anchorMode = 'fixed';
     targetEl.style.position = 'absolute';
     targetEl.style.left     = `${Math.round(left)}px`;
     targetEl.style.top      = `${Math.round(top)}px`;
@@ -577,45 +715,68 @@ const ImageResizer = (() => {
     targetEl.style.float    = 'none';
     targetEl.style.margin   = '0';
 
+    _syncMetricData(targetEl);
     _updateModeButtonText();
   }
 
-  function _toggleFreeFloating() {
+  function _applySizePercent(pct) {
     if (!_activeImg) return;
     const targetEl = _activeImg.closest('figure.image') || _activeImg;
-    const sheet    = document.getElementById('page-sheet');
-    const isFree   = _isFreeFloating(_activeImg);
+    const sheet = document.getElementById('page-sheet');
+    const maxW = sheet ? (sheet.clientWidth - 60) : 600;
+    const targetW = Math.max(80, Math.round(maxW * (pct / 100)));
 
-    const currentW = Math.round(targetEl.getBoundingClientRect().width || _activeImg.getBoundingClientRect().width);
-    if (currentW > 0) {
-      _activeImg.style.width  = `${currentW}px`;
-      _activeImg.style.height = 'auto';
-      targetEl.style.width    = `${currentW}px`;
-      targetEl.style.height   = 'auto';
+    _activeImg.style.width  = `${targetW}px`;
+    _activeImg.style.height = 'auto';
+    if (targetEl !== _activeImg) {
+      targetEl.style.width  = `${targetW}px`;
+      targetEl.style.height = 'auto';
     }
 
-    if (isFree) {
-      // Volta para o fluxo do texto dentro do editor
-      const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
-      if (editorEl && targetEl.parentNode !== editorEl) {
-        editorEl.appendChild(targetEl);
-      }
+    _syncMetricData(targetEl);
+    _updateBadge();
+    document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
+    setTimeout(_updateOverlayPosition, 50);
+  }
 
+  function _applyAlignment(align) {
+    if (!_activeImg) return;
+    const targetEl = _activeImg.closest('figure.image') || _activeImg;
+
+    if (targetEl.style.position === 'absolute') {
       targetEl.style.position = '';
       targetEl.style.left     = '';
       targetEl.style.top      = '';
-      targetEl.style.zIndex   = '';
-      _applyAlignment('center');
-      window.showToast?.('Modo de fluxo de texto ativado', 'info');
-    } else {
-      // Ativa modo livre absoluto e desacoplado
-      _enableFreeMode(targetEl, sheet);
-      window.showToast?.('Modo Livre ativado! Eixo 100% independente.', 'success');
     }
 
-    document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
+    targetEl.classList.remove('image-style-side', 'image-style-align-left', 'image-style-align-center', 'image-style-align-right', 'image-style-block');
+
+    if (align === 'left') {
+      targetEl.dataset.anchorMode = 'wrap';
+      targetEl.dataset.wrapAlign  = 'left';
+      targetEl.classList.add('image-style-align-left');
+      targetEl.style.float   = 'left';
+      targetEl.style.margin  = '10px 20px 14px 0';
+      targetEl.style.display = 'block';
+    } else if (align === 'right') {
+      targetEl.dataset.anchorMode = 'wrap';
+      targetEl.dataset.wrapAlign  = 'right';
+      targetEl.classList.add('image-style-align-right');
+      targetEl.style.float   = 'right';
+      targetEl.style.margin  = '10px 0 14px 20px';
+      targetEl.style.display = 'block';
+    } else {
+      targetEl.dataset.anchorMode = 'inline';
+      targetEl.classList.add('image-style-align-center');
+      targetEl.style.float   = 'none';
+      targetEl.style.margin  = '16px auto';
+      targetEl.style.display = 'table';
+    }
+
+    _syncMetricData(targetEl);
     _updateModeButtonText();
-    setTimeout(_updateOverlayPosition, 50);
+    _updateBadge();
+    document.getElementById('editor')?.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   /* ──────────────────────────────────────────────────────────
@@ -626,14 +787,12 @@ const ImageResizer = (() => {
     const targetEl = _activeImg.closest('figure.image') || _activeImg;
 
     if (_isFreeFloating(_activeImg)) {
-      // MODO LIVRE: Aumenta Z-Index (Traz para frente de outras camadas)
       const currentZ = parseInt(targetEl.style.zIndex || '10', 10);
       const newZ = Math.min(999, currentZ + 5);
       targetEl.style.zIndex = newZ.toString();
       _updateBadge();
       window.showToast?.(`Camada trazida para a frente (Nível: ${newZ})`, 'success');
     } else {
-      // MODO TEXTO: Move a imagem para CIMA do parágrafo anterior
       const parent = targetEl.parentNode;
       if (!parent) return;
       const prev = targetEl.previousElementSibling;
@@ -654,14 +813,12 @@ const ImageResizer = (() => {
     const targetEl = _activeImg.closest('figure.image') || _activeImg;
 
     if (_isFreeFloating(_activeImg)) {
-      // MODO LIVRE: Diminui Z-Index (Envia para trás de outras camadas)
       const currentZ = parseInt(targetEl.style.zIndex || '10', 10);
       const newZ = Math.max(1, currentZ - 5);
       targetEl.style.zIndex = newZ.toString();
       _updateBadge();
       window.showToast?.(`Camada enviada para trás (Nível: ${newZ})`, 'info');
     } else {
-      // MODO TEXTO: Move a imagem para BAIXO do próximo parágrafo
       const parent = targetEl.parentNode;
       if (!parent) return;
       const next = targetEl.nextElementSibling;
@@ -672,37 +829,6 @@ const ImageResizer = (() => {
     }
 
     setTimeout(_updateOverlayPosition, 50);
-  }
-
-  function _applyAlignment(align) {
-    if (!_activeImg) return;
-    const targetEl = _activeImg.closest('figure.image') || _activeImg;
-
-    if (targetEl.style.position === 'absolute') {
-      targetEl.style.position = '';
-      targetEl.style.left     = '';
-      targetEl.style.top      = '';
-      _updateModeButtonText();
-    }
-
-    targetEl.classList.remove('image-style-side', 'image-style-align-left', 'image-style-align-center', 'image-style-align-right', 'image-style-block');
-
-    if (align === 'left') {
-      targetEl.classList.add('image-style-align-left');
-      targetEl.style.float   = 'left';
-      targetEl.style.margin  = '10px 20px 14px 0';
-      targetEl.style.display = 'block';
-    } else if (align === 'right') {
-      targetEl.classList.add('image-style-align-right');
-      targetEl.style.float   = 'right';
-      targetEl.style.margin  = '10px 0 14px 20px';
-      targetEl.style.display = 'block';
-    } else {
-      targetEl.classList.add('image-style-align-center');
-      targetEl.style.float   = 'none';
-      targetEl.style.margin  = '16px auto';
-      targetEl.style.display = 'table';
-    }
   }
 
   /* ──────────────────────────────────────────────────────────

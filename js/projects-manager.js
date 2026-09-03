@@ -141,8 +141,8 @@ const ProjectsManager = (() => {
     if (window.EditorApp && typeof window.EditorApp.getData === 'function') {
       currentContent = window.EditorApp.getData();
     } else {
-      const sheet = document.getElementById('page-sheet');
-      currentContent = sheet ? sheet.innerHTML : (project.content || '');
+      const editorEl = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+      currentContent = editorEl ? editorEl.innerHTML : (project.content || '');
     }
 
     const currentFmt = window.PageFormats?.getCurrent() || { name: 'A4', landscape: false };

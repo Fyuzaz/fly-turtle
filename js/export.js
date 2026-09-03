@@ -22,48 +22,40 @@ const Exporter = (() => {
   };
 
   /* ══════════════════════════════════════════════════════════
-     OBTER CONTEÚDO HTML DO DOCUMENTO (Multi-Estratégia)
+     OBTER CONTEÚDO HTML DO DOCUMENTO (Fonte Única da Verdade)
   ══════════════════════════════════════════════════════════ */
   function getDocumentHtml() {
-    const editor = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
-    const sheet = document.getElementById('page-sheet');
+    let clean = '';
+    if (window.EditorApp && typeof window.EditorApp.getData === 'function') {
+      clean = window.EditorApp.getData();
+    }
 
-    let sourceEl = editor || sheet;
-    if (!sourceEl) return window.EditorApp?.getData() || '';
+    if (!clean) {
+      const editor = document.querySelector('.ck-editor__editable') || document.getElementById('editor');
+      if (editor) clean = editor.innerHTML || '';
+    }
 
-    // Clona para sanitização segura
-    const clone = sourceEl.cloneNode(true);
+    if (!clean) return '';
 
-    // Remove 100% dos elementos de UI, divisores visuais de tela, réguas e overlays
-    clone.querySelectorAll(`
-      #img-resizer-overlay, .img-resizer-overlay,
-      #img-drop-indicator, .img-drop-indicator,
-      .resizer-toolbar, .resizer-handle, .resizer-move-handle, .resizer-badge,
-      .link-preview-balloon, .toolbar-link-popover,
-      .multi-page-break, .page-guide-box, .page-boundary-marker, .page-boundary-badge,
-      .page-break-margin-bottom, .page-break-desk-gap, .page-break-margin-top, .page-margin-tag
-    `).forEach(el => el.remove());
+    // Sanitização defensiva de estilos transitórios de quebra de tela
+    const temp = document.createElement('div');
+    temp.innerHTML = clean;
 
-    // Se o elemento tiver classe .page-first-element, remove TODOS os estilos inline
-    // de paginação visual (margin-top, margin-left, margin-right) para não distorcer o PDF/PNG
-    clone.querySelectorAll('.page-first-element').forEach(el => {
+    temp.querySelectorAll('.page-first-element').forEach(el => {
       el.classList.remove('page-first-element');
       el.style.removeProperty('margin-top');
       el.style.removeProperty('margin-left');
       el.style.removeProperty('margin-right');
     });
 
-    // Remove também quaisquer estilos inline residuais de paginação em outros elementos
-    clone.querySelectorAll('[style]').forEach(el => {
-      const st = el.style;
-      // Remove margin-top se tiver o padrão de vão de mesa (calc com mm + px)
-      const mt = st.marginTop || '';
+    temp.querySelectorAll('[style]').forEach(el => {
+      const mt = el.style.marginTop || '';
       if (mt.includes('calc') && mt.includes('mm') && mt.includes('px')) {
-        st.removeProperty('margin-top');
+        el.style.removeProperty('margin-top');
       }
     });
 
-    return clone.innerHTML;
+    return temp.innerHTML;
   }
 
   /* ══════════════════════════════════════════════════════════
@@ -186,6 +178,11 @@ const Exporter = (() => {
     const padRgt = Math.max(0, parseFloat(m.right)  ?? 20);
     const filename = targetFilename || `${_sanitize(docName)}_${_sanitize(fmt.name)}_${_timestamp()}.doc`;
 
+    const formattedHtml = (html || '').replace(
+      /<div\b[^>]*class=["'][^"']*(?:page-break|ck-page-break)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi,
+      '<br clear="all" style="page-break-before:always; mso-break-type:section-break" />'
+    );
+
     const header = `<!DOCTYPE html><html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
 <head><meta charset='utf-8'><title>${docName}</title>
 <!--[if gte mso 9]>
@@ -219,13 +216,16 @@ const Exporter = (() => {
     line-height: 1.6;
     color: #111111;
   }
-  h1 { font-family: Arial, sans-serif; font-size: 24pt; font-weight: bold; margin-bottom: 12pt; }
-  h2 { font-family: Arial, sans-serif; font-size: 18pt; font-weight: bold; margin-top: 14pt; margin-bottom: 6pt; }
-  table { border-collapse: collapse; width: 100%; }
+  h1 { font-family: Arial, sans-serif; font-size: 24pt; font-weight: bold; margin-bottom: 12pt; page-break-after: avoid; mso-pagination: lines-together; }
+  h2 { font-family: Arial, sans-serif; font-size: 18pt; font-weight: bold; margin-top: 14pt; margin-bottom: 6pt; page-break-after: avoid; mso-pagination: lines-together; }
+  h3, h4 { font-family: Arial, sans-serif; font-weight: bold; page-break-after: avoid; mso-pagination: lines-together; }
+  table { border-collapse: collapse; width: 100%; page-break-inside: avoid; }
   th, td { border: 1px solid #333; padding: 6pt; }
-  img { max-width: 100%; height: auto; }
+  img { max-width: 100%; height: auto; page-break-inside: avoid; }
+  blockquote, pre { page-break-inside: avoid; }
+  .page-break, .ck-page-break { page-break-before: always; mso-break-type: section-break; }
 </style>
-</head><body><div class="Section1">${html}</div></body></html>`;
+</head><body><div class="Section1">${formattedHtml}</div></body></html>`;
 
     const blob = new Blob(['\ufeff' + header], { type: 'application/msword' });
     _downloadBlob(blob, filename, 'application/msword');

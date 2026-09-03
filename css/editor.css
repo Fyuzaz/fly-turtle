@@ -798,6 +798,46 @@
   z-index: 6;
 }
 
+/* ─── Camada de Overlays da Folha (Sheet Overlays Layer) ── */
+#sheet-overlays {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 20;
+}
+
+#sheet-overlays > * {
+  pointer-events: none;
+}
+
+#sheet-overlays button,
+#sheet-overlays a,
+#sheet-overlays [role="button"],
+#sheet-overlays .page-break-margin-btn,
+#sheet-overlays .multi-page-break-label {
+  pointer-events: auto;
+}
+
+/* ─── Contêiner Global de Overlays de Viewport / Seleção ── */
+#global-overlays-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+#global-overlays-container > * {
+  pointer-events: auto;
+}
+
 /* Divisores Físicos entre Folhas com Margens Independentes e Vão de Mesa */
 .multi-page-break {
   position: absolute;
@@ -983,7 +1023,8 @@
 }
 
 /* Quebra de Página Manual */
-.page-break {
+.page-break,
+.ck-page-break {
   page-break-after: always;
   break-after: page;
   display: block;
@@ -995,7 +1036,8 @@
   height: 1px;
 }
 
-.page-break::after {
+.page-break::after,
+.ck-page-break::after {
   content: '✂️ QUEBRA DE PÁGINA';
   position: absolute;
   top: -10px;
@@ -1009,6 +1051,33 @@
   color: var(--burnt-orange);
   border: 1px solid var(--ink-black);
   border-radius: 2px;
+}
+
+/* Regras de Quebra Determinística — Proteção de Blocos e Títulos */
+#editor table, .ck-content table {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#editor figure.image, .ck-content figure.image {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#editor blockquote, .ck-content blockquote {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#editor pre, .ck-content pre {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+#editor h1, #editor h2, #editor h3, #editor h4,
+.ck-content h1, .ck-content h2, .ck-content h3, .ck-content h4 {
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 /* Elemento que inicia em uma nova página.
@@ -1330,6 +1399,25 @@ figure.image img {
   margin-right: auto !important;
 }
 
+/* Modos de Âncora Canônicos do Padrão Google Docs */
+figure.image[data-anchor-mode="inline"] {
+  margin: 16px auto !important;
+  display: table !important;
+  float: none !important;
+  clear: both;
+}
+
+figure.image[data-anchor-mode="wrap"] {
+  clear: none;
+}
+
+figure.image[data-anchor-mode="fixed"] {
+  position: absolute !important;
+  margin: 0 !important;
+  float: none !important;
+  clear: none !important;
+}
+
 /* ─── Interactive Drag & Scale Overlay ───────── */
 .img-resizer-overlay {
   position: fixed;
@@ -1421,11 +1509,13 @@ figure.image img {
   color: var(--aged-paper);
 }
 
+.resizer-btn.active,
 .resizer-btn.btn-mode.active {
-  background: var(--burnt-orange);
-  color: var(--aged-paper);
-  border-color: var(--orange-dark);
-  box-shadow: inset 1px 1px 0px rgba(0,0,0,0.4);
+  background: var(--burnt-orange) !important;
+  color: #ffffff !important;
+  border-color: var(--aged-paper) !important;
+  box-shadow: inset 1px 1px 0px rgba(0,0,0,0.4) !important;
+  font-weight: 700;
 }
 
 .resizer-btn.danger:hover {

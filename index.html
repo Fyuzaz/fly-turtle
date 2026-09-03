@@ -181,21 +181,24 @@
     </div>
   </div><!-- /toolbar-link-popover -->
 
-  <!-- ─── FLOATING LINK PREVIEW BALLOON (Abrir / Copiar / Editar / Excluir) ── -->
-  <div id="link-preview-balloon" class="link-preview-balloon hidden" role="tooltip">
-    <div class="balloon-content">
-      <a id="balloon-link-href" href="#" target="_blank" rel="noopener noreferrer" class="balloon-url" title="Clique para abrir o link em nova aba">
-        <span class="balloon-icon">🌐</span>
-        <span id="balloon-link-text" class="balloon-text">https://...</span>
-        <span class="balloon-ext">↗</span>
-      </a>
-      <div class="balloon-actions">
-        <button type="button" class="balloon-btn" onclick="EditorApp.copyActiveLink()" title="Copiar Link">📋 Copiar</button>
-        <button type="button" class="balloon-btn" onclick="EditorApp.editActiveLink()" title="Editar Link">✏️ Editar</button>
-        <button type="button" class="balloon-btn danger" onclick="EditorApp.removeActiveLink()" title="Remover Link">🗑️</button>
+  <!-- ─── OVERLAYS GLOBAIS DE EDIÇÃO (Viewport / Seleção / Balões) ───── -->
+  <div id="global-overlays-container">
+    <!-- FLOATING LINK PREVIEW BALLOON (Abrir / Copiar / Editar / Excluir) -->
+    <div id="link-preview-balloon" class="link-preview-balloon hidden" role="tooltip">
+      <div class="balloon-content">
+        <a id="balloon-link-href" href="#" target="_blank" rel="noopener noreferrer" class="balloon-url" title="Clique para abrir o link em nova aba">
+          <span class="balloon-icon">🌐</span>
+          <span id="balloon-link-text" class="balloon-text">https://...</span>
+          <span class="balloon-ext">↗</span>
+        </a>
+        <div class="balloon-actions">
+          <button type="button" class="balloon-btn" onclick="EditorApp.copyActiveLink()" title="Copiar Link">📋 Copiar</button>
+          <button type="button" class="balloon-btn" onclick="EditorApp.editActiveLink()" title="Editar Link">✏️ Editar</button>
+          <button type="button" class="balloon-btn danger" onclick="EditorApp.removeActiveLink()" title="Remover Link">🗑️</button>
+        </div>
       </div>
     </div>
-  </div><!-- /link-preview-balloon -->
+  </div><!-- /global-overlays-container -->
 
 
   <!-- ─── ÁREA PRINCIPAL ───────────────────────────────── -->
@@ -204,6 +207,10 @@
     <!-- Workspace -->
     <div id="workspace">
       <div id="page-sheet" role="main" aria-label="Área de edição do documento">
+        <!-- Camada de Overlays e Divisores Geométricos da Folha (Desacoplada do Documento) -->
+        <div id="sheet-overlays" class="sheet-overlays" aria-hidden="true"></div>
+
+        <!-- Conteúdo do Documento Puro -->
         <div id="editor">
           <h2>Bem-vindo ao WebDoc</h2>
           <p>Comece a redigir seu documento aqui. Use a barra de formatação acima para estilizar o texto, inserir tabelas, imagens e muito mais.</p>
